@@ -78,6 +78,7 @@ import {
 } from "./app-tool-stream.ts";
 import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
+import { DictationClient, type DictationState } from "./dictation.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
 import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
 
@@ -142,6 +143,13 @@ export class OpenClawApp extends LitElement {
   @state() sidebarContent: string | null = null;
   @state() sidebarError: string | null = null;
   @state() splitRatio = this.settings.splitRatio;
+
+  // Dictation state
+  private dictationClient: DictationClient | null = null;
+  @state() dictationState: DictationState = "idle";
+  @state() dictationEnabled = false;
+  @state() showMicPermissionModal = false;
+  @state() pendingDictationText = "";
 
   @state() nodesLoading = false;
   @state() nodes: Array<Record<string, unknown>> = [];
@@ -351,6 +359,7 @@ export class OpenClawApp extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     handleConnected(this as unknown as Parameters<typeof handleConnected>[0]);
+    document.addEventListener("keydown", this.handleGlobalKeydown);
   }
 
   protected firstUpdated() {
@@ -359,6 +368,7 @@ export class OpenClawApp extends LitElement {
 
   disconnectedCallback() {
     handleDisconnected(this as unknown as Parameters<typeof handleDisconnected>[0]);
+    document.removeEventListener("keydown", this.handleGlobalKeydown);
     super.disconnectedCallback();
   }
 
@@ -564,6 +574,71 @@ export class OpenClawApp extends LitElement {
     this.splitRatio = newRatio;
     this.applySettings({ ...this.settings, splitRatio: newRatio });
   }
+
+  // Dictation handlers
+  handleDictationToggle = () => {
+    if (!this.dictationEnabled) {
+      return;
+    }
+
+    if (this.dictationState === "recording") {
+      this.dictationClient?.stop();
+    } else if (this.dictationState === "idle" || this.dictationState === "error") {
+      this.startDictation();
+    }
+  };
+
+  private startDictation = () => {
+    if (!this.dictationClient) {
+      this.dictationClient = new DictationClient({
+        gatewayUrl: this.settings.gatewayUrl,
+        callbacks: {
+          onStateChange: (state) => {
+            this.dictationState = state;
+            this.requestUpdate();
+          },
+          onTranscript: ({ text, isFinal }) => {
+            if (isFinal) {
+              // Append final text to message
+              const existing = this.chatMessage.trimEnd();
+              const spacer = existing && !existing.endsWith(" ") ? " " : "";
+              this.chatMessage = existing + spacer + text;
+              this.pendingDictationText = "";
+            } else {
+              // Show interim text
+              this.pendingDictationText = text;
+            }
+            this.requestUpdate();
+          },
+          onError: (error) => {
+            if (error === "permission_denied") {
+              this.showMicPermissionModal = true;
+            }
+            this.requestUpdate();
+          },
+        },
+      });
+    }
+    void this.dictationClient.start();
+  };
+
+  handleMicPermissionModalClose = () => {
+    this.showMicPermissionModal = false;
+    this.requestUpdate();
+  };
+
+  handleMicPermissionRetry = () => {
+    this.showMicPermissionModal = false;
+    this.startDictation();
+  };
+
+  private handleGlobalKeydown = (e: KeyboardEvent) => {
+    // Cmd/Ctrl + Shift + D for dictation
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      this.handleDictationToggle();
+    }
+  };
 
   render() {
     return renderApp(this as unknown as AppViewState);

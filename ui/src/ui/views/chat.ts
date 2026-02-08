@@ -10,6 +10,7 @@ import {
   renderStreamingGroup,
 } from "../chat/grouped-render.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
+import { renderMicPermissionModal } from "../components/mic-permission-modal.ts";
 import { icons } from "../icons.ts";
 import { renderMarkdownSidebar } from "./markdown-sidebar.ts";
 import "../components/resizable-divider.ts";
@@ -18,6 +19,12 @@ export type CompactionIndicatorStatus = {
   active: boolean;
   startedAt: number | null;
   completedAt: number | null;
+};
+
+export type ToolActivity = {
+  name: string;
+  startedAt: number;
+  completed: boolean;
 };
 
 export type ChatProps = {
@@ -31,6 +38,7 @@ export type ChatProps = {
   compactionStatus?: CompactionIndicatorStatus | null;
   messages: unknown[];
   toolMessages: unknown[];
+  toolActivity?: ToolActivity[];
   stream: string | null;
   streamStartedAt: number | null;
   assistantAvatarUrl?: string | null;
@@ -53,6 +61,15 @@ export type ChatProps = {
   // Image attachments
   attachments?: ChatAttachment[];
   onAttachmentsChange?: (attachments: ChatAttachment[]) => void;
+  // Dictation
+  dictationEnabled?: boolean;
+  dictationState?: "idle" | "requesting-permission" | "connecting" | "recording" | "error";
+  dictationError?: string | null;
+  showMicPermissionModal?: boolean;
+  onDictationToggle?: () => void;
+  onMicPermissionModalClose?: () => void;
+  onMicPermissionRetry?: () => void;
+  pendingDictationText?: string;
   // Scroll control
   showNewMessages?: boolean;
   onScrollToBottom?: () => void;
@@ -85,7 +102,7 @@ function renderCompactionIndicator(status: CompactionIndicatorStatus | null | un
   // Show "compacting..." while active
   if (status.active) {
     return html`
-      <div class="compaction-indicator compaction-indicator--active" role="status" aria-live="polite">
+      <div class="callout info compaction-indicator compaction-indicator--active">
         ${icons.loader} Compacting context...
       </div>
     `;
@@ -96,7 +113,7 @@ function renderCompactionIndicator(status: CompactionIndicatorStatus | null | un
     const elapsed = Date.now() - status.completedAt;
     if (elapsed < COMPACTION_TOAST_DURATION_MS) {
       return html`
-        <div class="compaction-indicator compaction-indicator--complete" role="status" aria-live="polite">
+        <div class="callout success compaction-indicator compaction-indicator--complete">
           ${icons.check} Context compacted
         </div>
       `;
@@ -104,6 +121,29 @@ function renderCompactionIndicator(status: CompactionIndicatorStatus | null | un
   }
 
   return nothing;
+}
+
+function renderToolActivity(activity: ToolActivity[] | undefined) {
+  if (!activity || activity.length === 0) {
+    return nothing;
+  }
+
+  const running = activity.filter((t) => !t.completed);
+  if (running.length === 0) {
+    return nothing;
+  }
+
+  const current = running[running.length - 1]; // Most recent
+  const elapsed = ((Date.now() - current.startedAt) / 1000).toFixed(1);
+
+  return html`
+    <div class="chat-activity">
+      <span class="chat-activity__icon">${icons.loader}</span>
+      <span class="chat-activity__text">
+        Running: <strong>${current.name}</strong> (${elapsed}s)
+      </span>
+    </div>
+  `;
 }
 
 function generateAttachmentId(): string {
@@ -198,11 +238,14 @@ export function renderChat(props: ChatProps) {
   };
 
   const hasAttachments = (props.attachments?.length ?? 0) > 0;
-  const composePlaceholder = props.connected
-    ? hasAttachments
-      ? "Add a message or paste more images..."
-      : "Message (↩ to send, Shift+↩ for line breaks, paste images)"
-    : "Connect to the gateway to start chatting…";
+  const isRecording = props.dictationState === "recording";
+  const composePlaceholder = isRecording
+    ? props.pendingDictationText || "Listening..."
+    : props.connected
+      ? hasAttachments
+        ? "Add a message or paste more images..."
+        : "Message (↩ to send, Shift+↩ for line breaks, paste images)"
+      : "Connect to the gateway to start chatting…";
 
   const splitRatio = props.splitRatio ?? 0.6;
   const sidebarOpen = Boolean(props.sidebarOpen && props.onCloseSidebar);
@@ -224,16 +267,6 @@ export function renderChat(props: ChatProps) {
         buildChatItems(props),
         (item) => item.key,
         (item) => {
-          if (item.kind === "divider") {
-            return html`
-              <div class="chat-divider" role="separator" data-ts=${String(item.timestamp)}>
-                <span class="chat-divider__line"></span>
-                <span class="chat-divider__label">${item.label}</span>
-                <span class="chat-divider__line"></span>
-              </div>
-            `;
-          }
-
           if (item.kind === "reading-indicator") {
             return renderReadingIndicatorGroup(assistantIdentity);
           }
@@ -259,6 +292,7 @@ export function renderChat(props: ChatProps) {
           return nothing;
         },
       )}
+      <div class="chat-scroll-sentinel" aria-hidden="true"></div>
     </div>
   `;
 
@@ -267,6 +301,8 @@ export function renderChat(props: ChatProps) {
       ${props.disabledReason ? html`<div class="callout">${props.disabledReason}</div>` : nothing}
 
       ${props.error ? html`<div class="callout danger">${props.error}</div>` : nothing}
+
+      ${renderCompactionIndicator(props.compactionStatus)}
 
       ${
         props.focusMode
@@ -319,6 +355,8 @@ export function renderChat(props: ChatProps) {
         }
       </div>
 
+      ${renderToolActivity(props.toolActivity)}
+
       ${
         props.queue.length
           ? html`
@@ -351,8 +389,6 @@ export function renderChat(props: ChatProps) {
           : nothing
       }
 
-      ${renderCompactionIndicator(props.compactionStatus)}
-
       ${
         props.showNewMessages
           ? html`
@@ -370,12 +406,12 @@ export function renderChat(props: ChatProps) {
       <div class="chat-compose">
         ${renderAttachmentPreview(props)}
         <div class="chat-compose__row">
-          <label class="field chat-compose__field">
+          <label class="field chat-compose__field ${isRecording ? "chat-compose__field--recording" : ""}">
             <span>Message</span>
             <textarea
               ${ref((el) => el && adjustTextareaHeight(el as HTMLTextAreaElement))}
               .value=${props.draft}
-              ?disabled=${!props.connected}
+              ?disabled=${!props.connected || isRecording}
               @keydown=${(e: KeyboardEvent) => {
                 if (e.key !== "Enter") {
                   return;
@@ -404,6 +440,22 @@ export function renderChat(props: ChatProps) {
             ></textarea>
           </label>
           <div class="chat-compose__actions">
+            ${
+              props.dictationEnabled !== false
+                ? html`
+              <button
+                class="btn chat-dictation-btn ${props.dictationState === "recording" ? "chat-dictation-btn--recording" : ""}"
+                type="button"
+                ?disabled=${!props.connected}
+                @click=${props.onDictationToggle}
+                data-tooltip=${navigator.platform.includes("Mac") ? "⌘⇧D" : "Ctrl+Shift+D"}
+                aria-label=${props.dictationState === "recording" ? "Stop dictation" : "Start dictation"}
+              >
+                ${icons.mic}
+              </button>
+            `
+                : nothing
+            }
             <button
               class="btn"
               ?disabled=${!props.connected || (!canAbort && props.sending)}
@@ -421,6 +473,12 @@ export function renderChat(props: ChatProps) {
           </div>
         </div>
       </div>
+
+      ${renderMicPermissionModal({
+        open: Boolean(props.showMicPermissionModal),
+        onClose: () => props.onMicPermissionModalClose?.(),
+        onRetry: () => props.onMicPermissionRetry?.(),
+      })}
     </section>
   `;
 }
@@ -487,20 +545,6 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   for (let i = historyStart; i < history.length; i++) {
     const msg = history[i];
     const normalized = normalizeMessage(msg);
-    const raw = msg as Record<string, unknown>;
-    const marker = raw.__openclaw as Record<string, unknown> | undefined;
-    if (marker && marker.kind === "compaction") {
-      items.push({
-        kind: "divider",
-        key:
-          typeof marker.id === "string"
-            ? `divider:compaction:${marker.id}`
-            : `divider:compaction:${normalized.timestamp}:${i}`,
-        label: "Compaction",
-        timestamp: normalized.timestamp ?? Date.now(),
-      });
-      continue;
-    }
 
     if (!props.showThinking && normalized.role.toLowerCase() === "toolresult") {
       continue;

@@ -26,6 +26,7 @@ import {
 } from "./controllers/exec-approval.ts";
 import { loadNodes } from "./controllers/nodes.ts";
 import { loadSessions } from "./controllers/sessions.ts";
+import { isDictationSupported } from "./dictation.ts";
 import { GatewayBrowserClient } from "./gateway.ts";
 
 type GatewayHost = {
@@ -54,6 +55,7 @@ type GatewayHost = {
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
+  dictationEnabled: boolean;
 };
 
 type SessionDefaultsSnapshot = {
@@ -140,6 +142,22 @@ export function connectGateway(host: GatewayHost) {
       (host as unknown as { chatStream: string | null }).chatStream = null;
       (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
+      // Stop any active dictation session on reconnect
+      const dictationHost = host as unknown as {
+        dictationClient: { stop: () => void } | null;
+        dictationState: string;
+      };
+      if (dictationHost.dictationClient && dictationHost.dictationState === "recording") {
+        dictationHost.dictationClient.stop();
+        dictationHost.dictationState = "idle";
+      }
+      // Check if dictation feature is available and supported
+      const features = hello.features as { dictation?: boolean } | undefined;
+      if (features?.dictation) {
+        host.dictationEnabled = isDictationSupported();
+      } else {
+        host.dictationEnabled = false;
+      }
       void loadAssistantIdentity(host as unknown as OpenClawApp);
       void loadAgents(host as unknown as OpenClawApp);
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
