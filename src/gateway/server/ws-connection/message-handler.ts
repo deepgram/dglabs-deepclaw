@@ -5,6 +5,7 @@ import type { createSubsystemLogger } from "../../../logging/subsystem.js";
 import type { ResolvedGatewayAuth } from "../../auth.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "../../server-methods/types.js";
 import type { GatewayWsClient } from "../ws-types.js";
+import { resolveEnvApiKey } from "../../../agents/model-auth.js";
 import { loadConfig } from "../../../config/config.js";
 import {
   deriveDeviceIdFromPublicKey,
@@ -849,6 +850,8 @@ export function attachGatewayWsMessageHandler(params: {
           snapshot.health = cachedHealth;
           snapshot.stateVersion.health = getHealthVersion();
         }
+        const deepgramKey = resolveEnvApiKey("deepgram");
+        const dictationEnabled = Boolean(deepgramKey?.apiKey?.trim());
         const helloOk = {
           type: "hello-ok",
           protocol: PROTOCOL_VERSION,
@@ -858,7 +861,7 @@ export function attachGatewayWsMessageHandler(params: {
             host: os.hostname(),
             connId,
           },
-          features: { methods: gatewayMethods, events },
+          features: { methods: gatewayMethods, events, dictation: dictationEnabled },
           snapshot,
           canvasHostUrl,
           auth: deviceToken

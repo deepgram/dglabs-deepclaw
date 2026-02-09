@@ -21,6 +21,7 @@ import {
   createToolEventRecipientRegistry,
 } from "./server-chat.js";
 import { MAX_PAYLOAD_BYTES } from "./server-constants.js";
+import { createDictationUpgradeHandler } from "./server-dictation.js";
 import { attachGatewayUpgradeHandler, createGatewayHttpServer } from "./server-http.js";
 import { createGatewayHooksRequestHandler } from "./server/hooks.js";
 import { listenGatewayHttpServer } from "./server/http-listen.js";
@@ -48,6 +49,7 @@ export async function createGatewayRuntimeState(params: {
   log: { info: (msg: string) => void; warn: (msg: string) => void };
   logHooks: ReturnType<typeof createSubsystemLogger>;
   logPlugins: ReturnType<typeof createSubsystemLogger>;
+  logDictation: ReturnType<typeof createSubsystemLogger>;
 }): Promise<{
   canvasHost: CanvasHostHandler | null;
   httpServer: HttpServer;
@@ -167,6 +169,7 @@ export async function createGatewayRuntimeState(params: {
     noServer: true,
     maxPayload: MAX_PAYLOAD_BYTES,
   });
+  const dictationHandler = createDictationUpgradeHandler({ log: params.logDictation });
   for (const server of httpServers) {
     attachGatewayUpgradeHandler({
       httpServer: server,
@@ -174,6 +177,7 @@ export async function createGatewayRuntimeState(params: {
       canvasHost,
       clients,
       resolvedAuth: params.resolvedAuth,
+      dictationHandler,
     });
   }
 

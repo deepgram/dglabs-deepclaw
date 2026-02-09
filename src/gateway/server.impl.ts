@@ -84,6 +84,7 @@ ensureOpenClawCliOnPath();
 
 const log = createSubsystemLogger("gateway");
 const logCanvas = log.child("canvas");
+const logDictation = log.child("dictation");
 const logDiscovery = log.child("discovery");
 const logTailscale = log.child("tailscale");
 const logChannels = log.child("channels");
@@ -350,6 +351,7 @@ export async function startGatewayServer(
     log,
     logHooks,
     logPlugins,
+    logDictation,
   });
   let bonjourStop: (() => Promise<void>) | null = null;
   const nodeRegistry = new NodeRegistry();

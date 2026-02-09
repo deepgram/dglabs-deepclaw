@@ -10,6 +10,7 @@ import {
   renderStreamingGroup,
 } from "../chat/grouped-render.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
+import { renderMicPermissionModal } from "../components/mic-permission-modal.ts";
 import { icons } from "../icons.ts";
 import { renderMarkdownSidebar } from "./markdown-sidebar.ts";
 import "../components/resizable-divider.ts";
@@ -68,6 +69,15 @@ export type ChatProps = {
   onCloseSidebar?: () => void;
   onSplitRatioChange?: (ratio: number) => void;
   onChatScroll?: (event: Event) => void;
+  // Dictation
+  dictationEnabled?: boolean;
+  dictationState?: "idle" | "requesting-permission" | "connecting" | "recording" | "error";
+  dictationError?: string | null;
+  showMicPermissionModal?: boolean;
+  onDictationToggle?: () => void;
+  onMicPermissionModalClose?: () => void;
+  onMicPermissionRetry?: () => void;
+  pendingDictationText?: string;
 };
 
 const COMPACTION_TOAST_DURATION_MS = 5000;
@@ -198,11 +208,14 @@ export function renderChat(props: ChatProps) {
   };
 
   const hasAttachments = (props.attachments?.length ?? 0) > 0;
-  const composePlaceholder = props.connected
-    ? hasAttachments
-      ? "Add a message or paste more images..."
-      : "Message (↩ to send, Shift+↩ for line breaks, paste images)"
-    : "Connect to the gateway to start chatting…";
+  const isRecording = props.dictationState === "recording";
+  const composePlaceholder = isRecording
+    ? props.pendingDictationText || "Listening..."
+    : props.connected
+      ? hasAttachments
+        ? "Add a message or paste more images..."
+        : "Message (↩ to send, Shift+↩ for line breaks, paste images)"
+      : "Connect to the gateway to start chatting…";
 
   const splitRatio = props.splitRatio ?? 0.6;
   const sidebarOpen = Boolean(props.sidebarOpen && props.onCloseSidebar);
@@ -370,12 +383,12 @@ export function renderChat(props: ChatProps) {
       <div class="chat-compose">
         ${renderAttachmentPreview(props)}
         <div class="chat-compose__row">
-          <label class="field chat-compose__field">
+          <label class="field chat-compose__field ${isRecording ? "chat-compose__field--recording" : ""}">
             <span>Message</span>
             <textarea
               ${ref((el) => el && adjustTextareaHeight(el as HTMLTextAreaElement))}
               .value=${props.draft}
-              ?disabled=${!props.connected}
+              ?disabled=${!props.connected || isRecording}
               @keydown=${(e: KeyboardEvent) => {
                 if (e.key !== "Enter") {
                   return;
@@ -412,6 +425,16 @@ export function renderChat(props: ChatProps) {
               ${canAbort ? "Stop" : "New session"}
             </button>
             <button
+              class="btn chat-dictation-btn ${props.dictationState === "recording" ? "chat-dictation-btn--recording" : ""}"
+              type="button"
+              ?disabled=${!props.connected || !props.dictationEnabled}
+              @click=${props.onDictationToggle}
+              data-tooltip=${navigator.platform.includes("Mac") ? "⌘⇧D" : "Ctrl+Shift+D"}
+              aria-label=${props.dictationState === "recording" ? "Stop dictation" : "Start dictation"}
+            >
+              ${icons.mic}
+            </button>
+            <button
               class="btn primary"
               ?disabled=${!props.connected}
               @click=${props.onSend}
@@ -421,6 +444,12 @@ export function renderChat(props: ChatProps) {
           </div>
         </div>
       </div>
+
+      ${renderMicPermissionModal({
+        open: Boolean(props.showMicPermissionModal),
+        onClose: () => props.onMicPermissionModalClose?.(),
+        onRetry: () => props.onMicPermissionRetry?.(),
+      })}
     </section>
   `;
 }

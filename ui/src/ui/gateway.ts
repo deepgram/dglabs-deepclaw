@@ -28,7 +28,7 @@ export type GatewayResponseFrame = {
 export type GatewayHelloOk = {
   type: "hello-ok";
   protocol: number;
-  features?: { methods?: string[]; events?: string[] };
+  features?: { methods?: string[]; events?: string[]; dictation?: boolean };
   snapshot?: unknown;
   auth?: {
     deviceToken?: string;

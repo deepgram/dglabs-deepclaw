@@ -6,6 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ### Added
 
+- Web UI: add speech-to-text dictation to chat compose via Deepgram Flux — mic button, keyboard shortcut (Cmd/Ctrl+Shift+D), recording indicators, and end-of-thought detection.
 - Gateway: add `agents.create`, `agents.update`, `agents.delete` RPC methods for web UI agent management. (#11045) Thanks @advaitpaliwal.
 - Gateway: add node command allowlists (default-deny unknown node commands; configurable via `gateway.nodes.allowCommands` / `gateway.nodes.denyCommands`). (#11755) Thanks @mbelinky.
 - Plugins: add `device-pair` (Telegram `/pair` flow) and `phone-control` (iOS/Android node controls). (#11755) Thanks @mbelinky.

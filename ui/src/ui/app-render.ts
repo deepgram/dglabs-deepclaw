@@ -1,5 +1,6 @@
 import { html, nothing } from "lit";
 import type { AppViewState } from "./app-view-state.ts";
+import type { OpenClawApp } from "./app.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
@@ -1127,6 +1128,16 @@ export function renderApp(state: AppViewState) {
                 onSplitRatioChange: (ratio: number) => state.handleSplitRatioChange(ratio),
                 assistantName: state.assistantName,
                 assistantAvatar: state.assistantAvatar,
+                // Dictation props
+                dictationEnabled: (state as unknown as OpenClawApp).dictationEnabled,
+                dictationState: (state as unknown as OpenClawApp).dictationState,
+                showMicPermissionModal: (state as unknown as OpenClawApp).showMicPermissionModal,
+                pendingDictationText: (state as unknown as OpenClawApp).pendingDictationText,
+                onDictationToggle: () => (state as unknown as OpenClawApp).handleDictationToggle(),
+                onMicPermissionModalClose: () =>
+                  (state as unknown as OpenClawApp).handleMicPermissionModalClose(),
+                onMicPermissionRetry: () =>
+                  (state as unknown as OpenClawApp).handleMicPermissionRetry(),
               })
             : nothing
         }
