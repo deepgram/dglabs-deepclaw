@@ -1221,6 +1221,7 @@ export function renderApp(state: AppViewState) {
                 onToggleAutoFollow: (next) => (state.logsAutoFollow = next),
                 onRefresh: () => loadLogs(state, { reset: true }),
                 onExport: (lines, label) => state.exportLogs(lines, label),
+                onCopy: (lines) => void navigator.clipboard.writeText(lines.join("\n")),
                 onScroll: (event) => state.handleLogsScroll(event),
               })
             : nothing
