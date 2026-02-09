@@ -425,7 +425,7 @@ export function renderChat(props: ChatProps) {
               ${canAbort ? "Stop" : "New session"}
             </button>
             ${
-              props.dictationEnabled !== false
+              props.dictationEnabled === true
                 ? html`
               <button
                 class="btn chat-dictation-btn ${props.dictationState === "recording" ? "chat-dictation-btn--recording" : ""}"

@@ -91,8 +91,26 @@ export function createDictationUpgradeHandler(opts: {
 
       let deepgramReady = false;
       const pendingAudio: Buffer[] = [];
+      let pendingBytes = 0;
+      const MAX_PENDING_BYTES = 256 * 1024; // 256 KB (~8s of 16kHz mono PCM)
+      const CONNECT_TIMEOUT_MS = 10_000;
+
+      // Close client if Deepgram doesn't connect in time
+      const connectTimer = setTimeout(() => {
+        if (!deepgramReady) {
+          log.error("dictation: Deepgram connection timeout");
+          if (clientWs.readyState === WebSocket.OPEN) {
+            clientWs.send(
+              JSON.stringify({ type: "Error", message: "Transcription service timeout" }),
+            );
+            clientWs.close(1011, "Deepgram connection timeout");
+          }
+          deepgramWs.close();
+        }
+      }, CONNECT_TIMEOUT_MS);
 
       deepgramWs.on("open", () => {
+        clearTimeout(connectTimer);
         log.info("dictation: connected to Deepgram");
         deepgramReady = true;
         // Flush any pending audio
@@ -100,6 +118,7 @@ export function createDictationUpgradeHandler(opts: {
           deepgramWs.send(chunk);
         }
         pendingAudio.length = 0;
+        pendingBytes = 0;
       });
 
       deepgramWs.on("message", (data: Buffer | ArrayBuffer | Buffer[]) => {
@@ -125,6 +144,7 @@ export function createDictationUpgradeHandler(opts: {
       });
 
       deepgramWs.on("error", (err: Error & { code?: string }) => {
+        clearTimeout(connectTimer);
         log.error(`dictation: Deepgram error: ${err.message} (code: ${err.code ?? "none"})`);
         if (clientWs.readyState === WebSocket.OPEN) {
           clientWs.send(JSON.stringify({ type: "Error", message: "Transcription service error" }));
@@ -133,6 +153,7 @@ export function createDictationUpgradeHandler(opts: {
       });
 
       deepgramWs.on("close", (code, reason) => {
+        clearTimeout(connectTimer);
         log.info(`dictation: Deepgram closed (${code}): ${reason.toString()}`);
         if (clientWs.readyState === WebSocket.OPEN) {
           clientWs.close(1000, "Deepgram closed");
@@ -174,9 +195,10 @@ export function createDictationUpgradeHandler(opts: {
             : Buffer.concat(data);
         if (deepgramReady && deepgramWs.readyState === WebSocket.OPEN) {
           deepgramWs.send(audioData);
-        } else {
-          // Buffer audio until Deepgram is ready
+        } else if (pendingBytes < MAX_PENDING_BYTES) {
+          // Buffer audio until Deepgram is ready (capped to prevent memory growth)
           pendingAudio.push(audioData);
+          pendingBytes += audioData.length;
         }
       });
 
