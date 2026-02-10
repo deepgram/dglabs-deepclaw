@@ -1616,13 +1616,19 @@ function renderAgentFiles(params: {
                             </div>
                           </div>
                           ${
-                            activeEntry.missing
+                            activeEntry.inherited
                               ? html`
                                   <div class="callout info" style="margin-top: 10px">
-                                    This file is missing. Saving will create it in the agent workspace.
+                                    This file is inherited from the default agent. Saving will create a local copy for this agent.
                                   </div>
                                 `
-                              : nothing
+                              : activeEntry.missing
+                                ? html`
+                                    <div class="callout info" style="margin-top: 10px">
+                                      This file is missing. Saving will create it in the agent workspace.
+                                    </div>
+                                  `
+                                : nothing
                           }
                           <label class="field" style="margin-top: 12px;">
                             <span>Content</span>
@@ -1648,7 +1654,9 @@ function renderAgentFiles(params: {
 function renderAgentFileRow(file: AgentFileEntry, active: string | null, onSelect: () => void) {
   const status = file.missing
     ? "Missing"
-    : `${formatBytes(file.size)} · ${formatRelativeTimestamp(file.updatedAtMs ?? null)}`;
+    : file.inherited
+      ? "Inherited"
+      : `${formatBytes(file.size)} · ${formatRelativeTimestamp(file.updatedAtMs ?? null)}`;
   return html`
     <button
       type="button"
@@ -1664,7 +1672,11 @@ function renderAgentFileRow(file: AgentFileEntry, active: string | null, onSelec
           ? html`
               <span class="agent-pill warn">missing</span>
             `
-          : nothing
+          : file.inherited
+            ? html`
+                <span class="agent-pill">inherited</span>
+              `
+            : nothing
       }
     </button>
   `;
@@ -1986,9 +1998,12 @@ function renderAgentSkills(params: {
       )
     : rawSkills;
   const groups = groupSkills(filtered);
-  const enabledCount = usingAllowlist
-    ? rawSkills.filter((skill) => allowSet.has(skill.name)).length
-    : rawSkills.length;
+  const enabledCount = rawSkills.filter((skill) => {
+    if (usingAllowlist && !allowSet.has(skill.name)) {
+      return false;
+    }
+    return skill.eligible && !skill.disabled;
+  }).length;
   const totalCount = rawSkills.length;
 
   return html`
@@ -2044,7 +2059,7 @@ function renderAgentSkills(params: {
             `
           : html`
               <div class="callout info" style="margin-top: 12px">
-                All skills are enabled. Disabling any skill will create a per-agent allowlist.
+                No per-agent allowlist. Toggling a skill off will create one.
               </div>
             `
       }
@@ -2109,11 +2124,17 @@ function renderAgentSkillGroup(
   },
 ) {
   const collapsedByDefault = group.id === "workspace" || group.id === "built-in";
+  const groupEnabled = group.skills.filter((s) => {
+    if (params.usingAllowlist && !params.allowSet.has(s.name)) {
+      return false;
+    }
+    return s.eligible && !s.disabled;
+  }).length;
   return html`
     <details class="agent-skills-group" ?open=${!collapsedByDefault}>
       <summary class="agent-skills-header">
         <span>${group.label}</span>
-        <span class="muted">${group.skills.length}</span>
+        <span class="muted">${groupEnabled} / ${group.skills.length}</span>
       </summary>
       <div class="list skills-grid">
         ${group.skills.map((skill) =>

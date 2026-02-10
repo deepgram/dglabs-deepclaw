@@ -617,7 +617,7 @@
 
 .field textarea {
   font-family: var(--mono);
-  min-height: 160px;
+  min-height: 500px;
   resize: vertical;
   white-space: pre;
   line-height: 1.5;
