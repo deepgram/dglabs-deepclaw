@@ -1,5 +1,8 @@
 services:
   openclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ${OPENCLAW_IMAGE:-openclaw:local}
     user: root
     environment:
@@ -10,48 +13,51 @@ services:
       CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY}
       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       PUBLIC_URL: ${PUBLIC_URL:-}
     volumes:
       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
-      - /Users/billgetman/openclaw/sandboxes:/Users/billgetman/openclaw/sandboxes
-      - /Users/billgetman/.docker/run/docker.sock:/var/run/docker.sock
-      - ${OPENCLAW_CONFIG_DIR}/docker-cli:/usr/local/bin/docker:ro
-      - ./dist:/app/dist:ro
+      - ./config/openclaw.json:/home/node/.openclaw/openclaw.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
       - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"
       - "${OPENCLAW_VOICE_PORT:-8000}:3334"
     init: true
-    restart: unless-stopped
+    # restart: unless-stopped
     command:
       [
         "node",
         "dist/index.js",
         "gateway",
+        "--allow-unconfigured",
         "--bind",
         "${OPENCLAW_GATEWAY_BIND:-lan}",
         "--port",
         "18789",
       ]
 
-  openclaw-cli:
-    image: ${OPENCLAW_IMAGE:-openclaw:local}
-    environment:
-      HOME: /home/node
-      TERM: xterm-256color
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
-      BROWSER: echo
-      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY}
-      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY}
-      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE}
-    volumes:
-      - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
-      - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
-    stdin_open: true
-    tty: true
-    init: true
-    entrypoint: ["node", "dist/index.js"]
+#   openclaw-cli:
+#     image: ${OPENCLAW_IMAGE:-openclaw:local}
+#     environment:
+#       HOME: /home/node
+#       TERM: xterm-256color
+#       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+#       BROWSER: echo
+#       CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY}
+#       CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY}
+#       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE}
+#     volumes:
+#       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
+#       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
+#     stdin_open: true
+#     tty: true
+#     init: true
+#     entrypoint: ["node", "dist/index.js"]

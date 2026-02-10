@@ -40,26 +40,7 @@
         "maxConcurrent": 8
       },
       "sandbox": {
-        "mode": "all",
-        // TODO: machine-specific — adjust per deployment
-        "workspaceRoot": "/Users/billgetman/openclaw/sandboxes",
-        "docker": {
-          "image": "openclaw-sandbox-dev:local",
-          "network": "openclaw-proxy",
-          "capDrop": ["ALL"],
-          "env": {
-            "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
-            "OPENAI_API_KEY": "${OPENAI_API_KEY}",
-            "HTTP_PROXY": "http://openclaw-squid-proxy:3128",
-            "HTTPS_PROXY": "http://openclaw-squid-proxy:3128",
-            "NO_PROXY": "localhost,127.0.0.1,host.docker.internal"
-          },
-          "pidsLimit": 512,
-          "memory": "8g",
-          "cpus": 4,
-          // TODO: machine-specific — adjust per deployment
-          "binds": ["/Users/billgetman/deepclaw:/deepclaw:rw"]
-        }
+        "mode": "off"
       }
     },
     "list": [
@@ -104,40 +85,14 @@
     "native": "auto",
     "nativeSkills": "auto"
   },
-  "channels": {
-    "slack": {
-      "mode": "socket",
-      "webhookPath": "/slack/events",
-      "enabled": true,
-      "botToken": "${SLACK_BOT_TOKEN}",
-      "appToken": "${SLACK_APP_TOKEN}",
-      "userTokenReadOnly": true,
-      "groupPolicy": "allowlist",
-      "dm": {
-        "enabled": true,
-        "policy": "pairing"
-      },
-      "channels": {
-        "C0A4UQCUD6D": {
-          "allow": true
-        },
-        "#dg-labs": {
-          "allow": true
-        },
-        "#team-dglabs": {
-          "allow": true
-        },
-        "#bix-revops": {
-          "allow": true
-        }
-      }
-    }
-  },
+  "channels": {},
   "gateway": {
     "port": 18789,
     "mode": "local",
     "bind": "lan",
-    "controlUi": {},
+    "controlUi": {
+      "dangerouslyDisableDeviceAuth": true
+    },
     "auth": {
       "mode": "token",
       "token": "${OPENCLAW_GATEWAY_TOKEN}"
@@ -164,8 +119,7 @@
     },
     "entries": {
       "nano-banana-pro": {
-        "enabled": true,
-        "apiKey": "${GOOGLE_API_KEY}"
+        "enabled": false
       },
       "deepclaw-voice": {
         "enabled": false
