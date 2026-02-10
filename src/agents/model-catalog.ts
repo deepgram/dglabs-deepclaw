@@ -61,7 +61,7 @@ export async function loadModelCatalog(params?: {
       });
     try {
       const cfg = params?.config ?? loadConfig();
-      await ensureOpenClawModelsJson(cfg);
+      const { activeProviders } = await ensureOpenClawModelsJson(cfg);
       // IMPORTANT: keep the dynamic import *inside* the try/catch.
       // If this fails once (e.g. during a pnpm install that temporarily swaps node_modules),
       // we must not poison the cache with a rejected promise (otherwise all channel handlers
@@ -95,12 +95,16 @@ export async function loadModelCatalog(params?: {
         models.push({ id, name, provider, contextWindow, reasoning, input });
       }
 
-      if (models.length === 0) {
+      // Filter to only providers with active credentials.
+      const filtered =
+        activeProviders.size > 0 ? models.filter((m) => activeProviders.has(m.provider)) : models;
+
+      if (filtered.length === 0) {
         // If we found nothing, don't cache this result so we can try again.
         modelCatalogPromise = null;
       }
 
-      return sortModels(models);
+      return sortModels(filtered);
     } catch (error) {
       if (!hasLoggedModelCatalogError) {
         hasLoggedModelCatalogError = true;

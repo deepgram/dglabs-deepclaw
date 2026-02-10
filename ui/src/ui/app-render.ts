@@ -4,7 +4,9 @@ import type { OpenClawApp } from "./app.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
+import { DEFAULT_ADD_AGENT_FORM } from "./app-defaults.ts";
 import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
+import { submitAddAgent } from "./controllers/add-agent.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
@@ -41,8 +43,10 @@ import {
   updateExecApprovalsFormValue,
 } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
+import { loadModelCatalog } from "./controllers/model-catalog.ts";
 import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
+import { saveAgentIdentity } from "./controllers/save-identity.ts";
 import { deleteSession, loadSessions, patchSession } from "./controllers/sessions.ts";
 import {
   installSkill,
@@ -64,6 +68,7 @@ const debouncedLoadUsage = (state: UsageState) => {
   usageDateDebounceTimeout = window.setTimeout(() => void loadUsage(state), 400);
 };
 import { renderMobileTabBar } from "./mobile-tab-bar.ts";
+import { renderAddAgentModal } from "./views/add-agent-modal.ts";
 import { renderAgents } from "./views/agents.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
@@ -610,7 +615,10 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "agents"
-            ? renderAgents({
+            ? (state.agentModelCatalog.length === 0 &&
+                !state.agentModelCatalogLoading &&
+                void loadModelCatalog(state),
+              renderAgents({
                 loading: state.agentsLoading,
                 error: state.agentsError,
                 agentsList: state.agentsList,
@@ -638,13 +646,41 @@ export function renderApp(state: AppViewState) {
                 agentIdentityLoading: state.agentIdentityLoading,
                 agentIdentityError: state.agentIdentityError,
                 agentIdentityById: state.agentIdentityById,
+                identityDraftName: state.identityDraftName,
+                identityDraftEmoji: state.identityDraftEmoji,
+                identitySaving: state.identitySaving,
+                onIdentityNameChange: (value) => {
+                  state.identityDraftName = value;
+                },
+                onIdentityEmojiChange: (value) => {
+                  state.identityDraftEmoji = value;
+                },
+                onIdentitySave: (agentId) => {
+                  void saveAgentIdentity(
+                    state as unknown as Parameters<typeof saveAgentIdentity>[0],
+                    agentId,
+                  );
+                },
+                onIdentityReset: () => {
+                  state.identityDraftName = null;
+                  state.identityDraftEmoji = null;
+                },
                 agentSkillsLoading: state.agentSkillsLoading,
                 agentSkillsReport: state.agentSkillsReport,
                 agentSkillsError: state.agentSkillsError,
                 agentSkillsAgentId: state.agentSkillsAgentId,
                 skillsFilter: state.skillsFilter,
+                modelCatalog: state.agentModelCatalog,
+                modelCatalogLoading: state.agentModelCatalogLoading,
+                onModelCatalogRefresh: () => loadModelCatalog(state, { refresh: true }),
+                onAddAgentOpen: () => {
+                  state.addAgentForm = { ...DEFAULT_ADD_AGENT_FORM };
+                  state.addAgentError = null;
+                  state.addAgentModalOpen = true;
+                },
                 onRefresh: async () => {
                   await loadAgents(state);
+                  void loadModelCatalog(state, { refresh: true });
                   const agentIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
                   if (agentIds.length > 0) {
                     void loadAgentIdentities(state, agentIds);
@@ -655,6 +691,8 @@ export function renderApp(state: AppViewState) {
                     return;
                   }
                   state.agentsSelectedId = agentId;
+                  state.identityDraftName = null;
+                  state.identityDraftEmoji = null;
                   state.agentFilesList = null;
                   state.agentFilesError = null;
                   state.agentFilesLoading = false;
@@ -950,7 +988,32 @@ export function renderApp(state: AppViewState) {
                     : { fallbacks: normalized };
                   updateConfigFormValue(state, basePath, next);
                 },
-              })
+                onAgentTypeChange: (agentId, agentType) => {
+                  if (!configValue) {
+                    return;
+                  }
+                  const list = (configValue as { agents?: { list?: unknown[] } }).agents?.list;
+                  if (!Array.isArray(list)) {
+                    return;
+                  }
+                  const index = list.findIndex(
+                    (entry) =>
+                      entry &&
+                      typeof entry === "object" &&
+                      "id" in entry &&
+                      (entry as { id?: string }).id === agentId,
+                  );
+                  if (index < 0) {
+                    return;
+                  }
+                  const basePath = ["agents", "list", index, "agentType"];
+                  if (agentType === "voice") {
+                    updateConfigFormValue(state, basePath, "voice");
+                  } else {
+                    removeConfigFormValue(state, basePath);
+                  }
+                },
+              }))
             : nothing
         }
 
@@ -1231,6 +1294,28 @@ export function renderApp(state: AppViewState) {
       ${renderMobileTabBar(state, state.mobileMoreOpen, () => state.handleToggleMobileMore())}
       ${renderExecApprovalPrompt(state)}
       ${renderGatewayUrlConfirmation(state)}
+      ${renderAddAgentModal({
+        open: state.addAgentModalOpen,
+        form: state.addAgentForm,
+        busy: state.addAgentBusy,
+        error: state.addAgentError,
+        onFormChange: (patch) => {
+          state.addAgentForm = { ...state.addAgentForm, ...patch };
+        },
+        onSubmit: async () => {
+          const agentId = await submitAddAgent(state);
+          if (agentId) {
+            await loadAgents(state);
+            const agentIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
+            if (agentIds.length > 0) {
+              void loadAgentIdentities(state, agentIds);
+            }
+          }
+        },
+        onClose: () => {
+          state.addAgentModalOpen = false;
+        },
+      })}
     </div>
   `;
 }

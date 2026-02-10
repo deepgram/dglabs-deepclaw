@@ -20,7 +20,8 @@ export const modelsHandlers: GatewayRequestHandlers = {
       return;
     }
     try {
-      const models = await context.loadGatewayModelCatalog();
+      const refresh = (params as { refresh?: boolean }).refresh === true;
+      const models = await context.loadGatewayModelCatalog({ useCache: !refresh });
       respond(true, { models }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));

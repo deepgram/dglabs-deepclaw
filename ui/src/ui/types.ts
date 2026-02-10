@@ -326,6 +326,7 @@ export type GatewaySessionsDefaults = {
 export type GatewayAgentRow = {
   id: string;
   name?: string;
+  agentType?: "text" | "voice";
   identity?: {
     name?: string;
     theme?: string;
@@ -763,6 +764,15 @@ export type StatusSummary = Record<string, unknown>;
 export type HealthSnapshot = Record<string, unknown>;
 
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+
+export type ModelCatalogEntry = {
+  id: string;
+  name: string;
+  provider: string;
+  contextWindow?: number;
+  reasoning?: boolean;
+  input?: Array<"text" | "image">;
+};
 
 export type LogEntry = {
   raw: string;

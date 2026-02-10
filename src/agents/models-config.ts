@@ -84,7 +84,7 @@ async function readJson(pathname: string): Promise<unknown> {
 export async function ensureOpenClawModelsJson(
   config?: OpenClawConfig,
   agentDirOverride?: string,
-): Promise<{ agentDir: string; wrote: boolean }> {
+): Promise<{ agentDir: string; wrote: boolean; activeProviders: Set<string> }> {
   const cfg = config ?? loadConfig();
   const agentDir = agentDirOverride?.trim() ? agentDirOverride.trim() : resolveOpenClawAgentDir();
 
@@ -106,8 +106,10 @@ export async function ensureOpenClawModelsJson(
     providers["github-copilot"] = implicitCopilot;
   }
 
-  if (Object.keys(providers).length === 0) {
-    return { agentDir, wrote: false };
+  const activeProviders = new Set(Object.keys(providers));
+
+  if (activeProviders.size === 0) {
+    return { agentDir, wrote: false, activeProviders };
   }
 
   const mode = cfg.models?.mode ?? DEFAULT_MODE;
@@ -138,10 +140,10 @@ export async function ensureOpenClawModelsJson(
   }
 
   if (existingRaw === next) {
-    return { agentDir, wrote: false };
+    return { agentDir, wrote: false, activeProviders };
   }
 
   await fs.mkdir(agentDir, { recursive: true, mode: 0o700 });
   await fs.writeFile(targetPath, next, { mode: 0o600 });
-  return { agentDir, wrote: true };
+  return { agentDir, wrote: true, activeProviders };
 }

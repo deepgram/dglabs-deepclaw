@@ -4,6 +4,7 @@ import {
   DEFAULT_COPILOT_API_BASE_URL,
   resolveCopilotApiToken,
 } from "../providers/github-copilot-token.js";
+import { discoverAnthropicModels, ANTHROPIC_BASE_URL } from "./anthropic-models.js";
 import { ensureAuthProfileStore, listProfilesForProvider } from "./auth-profiles.js";
 import { discoverBedrockModels } from "./bedrock-discovery.js";
 import {
@@ -11,6 +12,7 @@ import {
   resolveCloudflareAiGatewayBaseUrl,
 } from "./cloudflare-ai-gateway.js";
 import { resolveAwsSdkEnvVarName, resolveEnvApiKey } from "./model-auth.js";
+import { discoverOpenAiModels, OPENAI_BASE_URL } from "./openai-models.js";
 import {
   buildSyntheticModelDefinition,
   SYNTHETIC_BASE_URL,
@@ -405,6 +407,24 @@ async function buildVeniceProvider(): Promise<ProviderConfig> {
   };
 }
 
+async function buildOpenAiProvider(apiKey: string): Promise<ProviderConfig> {
+  const models = await discoverOpenAiModels({ apiKey });
+  return {
+    baseUrl: OPENAI_BASE_URL,
+    api: "openai-completions",
+    models,
+  };
+}
+
+async function buildAnthropicProvider(apiKey: string): Promise<ProviderConfig> {
+  const models = await discoverAnthropicModels({ apiKey });
+  return {
+    baseUrl: ANTHROPIC_BASE_URL,
+    api: "anthropic-messages",
+    models,
+  };
+}
+
 async function buildOllamaProvider(): Promise<ProviderConfig> {
   const models = await discoverOllamaModels();
   return {
@@ -483,6 +503,31 @@ export async function resolveImplicitProviders(params: {
     resolveApiKeyFromProfiles({ provider: "venice", store: authStore });
   if (veniceKey) {
     providers.venice = { ...(await buildVeniceProvider()), apiKey: veniceKey };
+  }
+
+  const openaiEnv = resolveEnvApiKey("openai");
+  const openaiProfileKey = resolveApiKeyFromProfiles({ provider: "openai", store: authStore });
+  const openaiApiKeyValue = openaiEnv?.apiKey ?? openaiProfileKey;
+  const openaiProviderKey = resolveEnvApiKeyVarName("openai") ?? openaiProfileKey;
+  if (openaiApiKeyValue && openaiProviderKey) {
+    providers.openai = {
+      ...(await buildOpenAiProvider(openaiApiKeyValue)),
+      apiKey: openaiProviderKey,
+    };
+  }
+
+  const anthropicEnv = resolveEnvApiKey("anthropic");
+  const anthropicProfileKey = resolveApiKeyFromProfiles({
+    provider: "anthropic",
+    store: authStore,
+  });
+  const anthropicApiKeyValue = anthropicEnv?.apiKey ?? anthropicProfileKey;
+  const anthropicProviderKey = resolveEnvApiKeyVarName("anthropic") ?? anthropicProfileKey;
+  if (anthropicApiKeyValue && anthropicProviderKey) {
+    providers.anthropic = {
+      ...(await buildAnthropicProvider(anthropicApiKeyValue)),
+      apiKey: anthropicProviderKey,
+    };
   }
 
   const qwenProfiles = listProfilesForProvider(authStore, "qwen-portal");

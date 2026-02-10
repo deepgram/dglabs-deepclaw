@@ -21,6 +21,7 @@ import type {
   HealthSnapshot,
   LogEntry,
   LogLevel,
+  ModelCatalogEntry,
   PresenceEntry,
   ChannelsStatusSnapshot,
   SessionsListResult,
@@ -47,7 +48,11 @@ import {
   handleSendChat as handleSendChatInternal,
   removeQueuedMessage as removeQueuedMessageInternal,
 } from "./app-chat.ts";
-import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS } from "./app-defaults.ts";
+import {
+  DEFAULT_ADD_AGENT_FORM,
+  DEFAULT_CRON_FORM,
+  DEFAULT_LOG_LEVEL_FILTERS,
+} from "./app-defaults.ts";
 import { connectGateway as connectGatewayInternal } from "./app-gateway.ts";
 import {
   handleConnected,
@@ -80,7 +85,12 @@ import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
 import { DictationClient, type DictationState } from "./dictation.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
-import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
+import {
+  type AddAgentFormState,
+  type ChatAttachment,
+  type ChatQueueItem,
+  type CronFormState,
+} from "./ui-types.ts";
 
 declare global {
   interface Window {
@@ -228,6 +238,18 @@ export class OpenClawApp extends LitElement {
   @state() agentSkillsError: string | null = null;
   @state() agentSkillsReport: SkillStatusReport | null = null;
   @state() agentSkillsAgentId: string | null = null;
+
+  @state() agentModelCatalog: ModelCatalogEntry[] = [];
+  @state() agentModelCatalogLoading = false;
+
+  @state() identityDraftName: string | null = null;
+  @state() identityDraftEmoji: string | null = null;
+  @state() identitySaving = false;
+
+  @state() addAgentModalOpen = false;
+  @state() addAgentForm: AddAgentFormState = { ...DEFAULT_ADD_AGENT_FORM };
+  @state() addAgentBusy = false;
+  @state() addAgentError: string | null = null;
 
   @state() sessionsLoading = false;
   @state() sessionsResult: SessionsListResult | null = null;
@@ -510,6 +532,24 @@ export class OpenClawApp extends LitElement {
 
   handleNostrProfileToggleAdvanced() {
     handleNostrProfileToggleAdvancedInternal(this);
+  }
+
+  handleAddAgentOpen() {
+    this.addAgentForm = { ...DEFAULT_ADD_AGENT_FORM };
+    this.addAgentError = null;
+    this.addAgentModalOpen = true;
+  }
+
+  handleAddAgentClose() {
+    this.addAgentModalOpen = false;
+  }
+
+  handleAddAgentFormChange(patch: Partial<AddAgentFormState>) {
+    this.addAgentForm = { ...this.addAgentForm, ...patch };
+  }
+
+  async handleAddAgentSubmit() {
+    // Wired in app-render.ts
   }
 
   async handleExecApprovalDecision(decision: "allow-once" | "allow-always" | "deny") {

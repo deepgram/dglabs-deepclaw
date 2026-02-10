@@ -5,6 +5,7 @@ import {
   listAgentIds,
   resolveAgentDir,
   resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
 } from "../../agents/agent-scope.js";
 import {
   DEFAULT_AGENTS_FILENAME,
@@ -219,6 +220,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     const workspaceDir = resolveUserPath(String(params.workspace ?? "").trim());
+    const agentType = params.agentType === "voice" ? ("voice" as const) : undefined;
 
     // Resolve agentDir against the config we're about to persist (vs the pre-write config),
     // so subsequent resolutions can't disagree about the agent's directory.
@@ -226,6 +228,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       agentId,
       name: rawName,
       workspace: workspaceDir,
+      ...(agentType ? { agentType } : {}),
     });
     const agentDir = resolveAgentDir(nextConfig, agentId);
     nextConfig = applyAgentConfig(nextConfig, { agentId, agentDir });
@@ -235,6 +238,28 @@ export const agentsHandlers: GatewayRequestHandlers = {
     const skipBootstrap = Boolean(nextConfig.agents?.defaults?.skipBootstrap);
     await ensureAgentWorkspace({ dir: workspaceDir, ensureBootstrapFiles: !skipBootstrap });
     await fs.mkdir(resolveSessionTranscriptsDirForAgent(agentId), { recursive: true });
+
+    // Symlink USER.md from the default agent's workspace so new agents inherit
+    // the user profile automatically. If the user later needs per-agent overrides,
+    // they can replace the symlink with a regular file.
+    // TODO: consider a fallback-chain approach instead (read default agent's USER.md
+    // at runtime if the agent's own copy is empty/missing) for more flexibility.
+    try {
+      const defaultAgentId = normalizeAgentId(resolveDefaultAgentId(cfg));
+      if (agentId !== defaultAgentId) {
+        const defaultWorkspace = resolveAgentWorkspaceDir(cfg, defaultAgentId);
+        const defaultUserPath = path.join(defaultWorkspace, DEFAULT_USER_FILENAME);
+        const newUserPath = path.join(workspaceDir, DEFAULT_USER_FILENAME);
+        const defaultUserStat = await fs.stat(defaultUserPath).catch(() => null);
+        if (defaultUserStat?.isFile()) {
+          // Remove the blank bootstrap USER.md and replace with a symlink.
+          await fs.unlink(newUserPath).catch(() => {});
+          await fs.symlink(defaultUserPath, newUserPath);
+        }
+      }
+    } catch {
+      // Non-fatal: agent still works, just won't have inherited user profile.
+    }
 
     await writeConfigFile(nextConfig);
 
@@ -287,6 +312,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
 
     const model = resolveOptionalStringParam(params.model);
     const avatar = resolveOptionalStringParam(params.avatar);
+    const agentType =
+      params.agentType === "text" || params.agentType === "voice" ? params.agentType : undefined;
 
     const nextConfig = applyAgentConfig(cfg, {
       agentId,
@@ -295,6 +322,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
         : {}),
       ...(workspaceDir ? { workspace: workspaceDir } : {}),
       ...(model ? { model } : {}),
+      ...(agentType ? { agentType } : {}),
     });
 
     await writeConfigFile(nextConfig);
