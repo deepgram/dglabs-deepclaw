@@ -2,6 +2,7 @@ import type { VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type { TelephonyTtsRuntime } from "./telephony-tts.js";
+import { generateCallSummary } from "./call-summary.js";
 import { resolveVoiceCallConfig, validateProviderConfig } from "./config.js";
 import { DeepgramMediaBridge } from "./deepgram-media-bridge.js";
 import { CallManager } from "./manager.js";
@@ -165,10 +166,16 @@ export async function createVoiceCallRuntime(params: {
     publicUrl = await setupTailscaleExposure(config);
   }
 
-  const webhookUrl = publicUrl ?? localUrl;
+  // `publicUrl` is treated as a public *origin* (scheme+host) for exposure.
+  // The actual webhook endpoint must include `config.serve.path`.
+  //
+  // Important: do NOT require users to append `/voice/webhook` to PUBLIC_URL.
+  // PUBLIC_URL should be the tunnel origin (e.g. https://xyz.ngrok.app).
+  const publicOrigin = publicUrl ? new URL(publicUrl).origin : null;
+  const webhookUrl = publicOrigin ? new URL(config.serve.path, publicOrigin).toString() : localUrl;
 
-  if (publicUrl && provider.name === "twilio") {
-    (provider as TwilioProvider).setPublicUrl(publicUrl);
+  if (publicOrigin && provider.name === "twilio") {
+    (provider as TwilioProvider).setPublicUrl(publicOrigin);
   }
 
   if (provider.name === "twilio" && config.streaming?.enabled) {
@@ -206,8 +213,8 @@ export async function createVoiceCallRuntime(params: {
     const twilioProvider = provider as TwilioProvider;
 
     // Ensure public URL is set for stream URL generation
-    if (publicUrl && !twilioProvider.getPublicUrl()) {
-      twilioProvider.setPublicUrl(publicUrl);
+    if (publicOrigin && !twilioProvider.getPublicUrl()) {
+      twilioProvider.setPublicUrl(publicOrigin);
     }
 
     const gatewayPort = process.env.OPENCLAW_GATEWAY_PORT || "18789";
@@ -219,7 +226,7 @@ export async function createVoiceCallRuntime(params: {
       manager,
       gatewayUrl,
       gatewayToken,
-      publicUrl: publicUrl ?? undefined,
+      publicUrl: publicOrigin ?? undefined,
       coreConfig,
       voiceCallConfig: config,
       shouldAcceptStream: ({ callId, token }) => {
@@ -230,6 +237,14 @@ export async function createVoiceCallRuntime(params: {
           return false;
         }
         return true;
+      },
+      onCallEnded: (callRecord, agentId) => {
+        void generateCallSummary({
+          voiceConfig: config,
+          coreConfig,
+          callRecord,
+          agentId,
+        });
       },
     });
 
@@ -253,8 +268,8 @@ export async function createVoiceCallRuntime(params: {
 
   log.info("[voice-call] Runtime initialized");
   log.info(`[voice-call] Webhook URL: ${webhookUrl}`);
-  if (publicUrl) {
-    log.info(`[voice-call] Public URL: ${publicUrl}`);
+  if (publicOrigin) {
+    log.info(`[voice-call] Public URL: ${publicOrigin}`);
   }
 
   return {
@@ -263,7 +278,7 @@ export async function createVoiceCallRuntime(params: {
     manager,
     webhookServer,
     webhookUrl,
-    publicUrl,
+    publicUrl: publicOrigin,
     stop,
   };
 }

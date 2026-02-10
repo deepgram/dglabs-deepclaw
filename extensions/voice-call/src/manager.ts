@@ -59,6 +59,8 @@ export class CallManager {
   >();
   /** Max duration timers to auto-hangup calls after configured timeout */
   private maxDurationTimers = new Map<CallId, NodeJS.Timeout>();
+  /** Grace period for pruning stale active calls on startup (crash/missed callback recovery) */
+  private static readonly STALE_ACTIVE_CALL_GRACE_MS = 60_000;
 
   constructor(config: VoiceCallConfig, storePath?: string) {
     this.config = config;
@@ -104,6 +106,9 @@ export class CallManager {
     const initialMessage = opts.message;
     const mode = opts.mode ?? this.config.outbound.defaultMode;
     const agentId = opts.agentId;
+    console.log(
+      `[voice-call] Outbound call: mode=${mode}, provider=${this.config.provider}, to=${to}`,
+    );
     if (!this.provider) {
       return { callId: "", success: false, error: "Provider not initialized" };
     }
@@ -119,10 +124,23 @@ export class CallManager {
     // Check concurrent call limit
     const activeCalls = this.getActiveCalls();
     if (activeCalls.length >= this.config.maxConcurrentCalls) {
+      const now = Date.now();
+      const summary = activeCalls
+        .slice()
+        .sort((a, b) => a.startedAt - b.startedAt)
+        .slice(0, 3)
+        .map((c) => {
+          const ageSec = Math.max(0, Math.round((now - c.startedAt) / 1000));
+          const provider = c.providerCallId ? ` providerCallId=${c.providerCallId}` : "";
+          return `${c.callId} state=${c.state} ageSec=${ageSec}${provider}`;
+        })
+        .join("; ");
       return {
         callId: "",
         success: false,
-        error: `Maximum concurrent calls (${this.config.maxConcurrentCalls}) reached`,
+        error: `Maximum concurrent calls (${this.config.maxConcurrentCalls}) reached${
+          summary ? ` (active: ${summary})` : ""
+        }`,
       };
     }
 
@@ -163,11 +181,34 @@ export class CallManager {
 
     try {
       // For notify mode with a message, use inline TwiML with <Say>
+      // Skip inline TwiML for Deepgram — let the stream path handle voice.
       let inlineTwiml: string | undefined;
-      if (mode === "notify" && initialMessage) {
+      if (mode === "notify" && initialMessage && this.config.provider === "deepgram") {
+        console.log(
+          `[voice-call] Notify mode via Deepgram stream path (callId: ${callId}, messageChars: ${initialMessage.length})`,
+        );
+      }
+      if (mode === "notify" && initialMessage && this.config.provider !== "deepgram") {
         const pollyVoice = mapVoiceToPolly(this.config.tts?.openai?.voice);
         inlineTwiml = this.generateNotifyTwiml(initialMessage, pollyVoice);
-        console.log(`[voice-call] Using inline TwiML for notify mode (voice: ${pollyVoice})`);
+        const twimlBytes = Buffer.byteLength(inlineTwiml, "utf-8");
+        const twimlHash = crypto
+          .createHash("sha256")
+          .update(inlineTwiml, "utf-8")
+          .digest("hex")
+          .slice(0, 12);
+        console.log(
+          `[voice-call] Using inline TwiML for notify mode (voice: ${pollyVoice}, callId: ${callId}, messageChars: ${initialMessage.length}, twimlBytes: ${twimlBytes}, twimlHash: ${twimlHash})`,
+        );
+        const twimlDebug = process.env.VOICE_CALL_TWIML_DEBUG?.trim().toLowerCase();
+        if (twimlDebug === "1" || twimlDebug === "true" || twimlDebug === "yes") {
+          const preview = inlineTwiml
+            .replace(/(<Say\b[^>]*>)([\s\S]*?)(<\/Say>)/g, "$1[redacted]$3")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 240);
+          console.log(`[voice-call] Notify TwiML preview (redacted): "${preview}"`);
+        }
       }
 
       const result = await this.provider.initiateCall({
@@ -868,8 +909,23 @@ export class CallManager {
     }
 
     // Only keep non-terminal calls
+    const now = Date.now();
+    const maxActiveAgeMs =
+      this.config.maxDurationSeconds * 1000 + CallManager.STALE_ACTIVE_CALL_GRACE_MS;
     for (const [callId, call] of callMap) {
       if (!TerminalStates.has(call.state)) {
+        const ageMs = now - call.startedAt;
+        if (Number.isFinite(ageMs) && ageMs > maxActiveAgeMs) {
+          const ageSec = Math.round(ageMs / 1000);
+          console.warn(
+            `[voice-call] Pruning stale active call ${callId} (state=${call.state}, ageSec=${ageSec})`,
+          );
+          call.state = "timeout";
+          call.endedAt = now;
+          call.endReason = "timeout";
+          this.persistCallRecord(call);
+          continue;
+        }
         this.activeCalls.set(callId, call);
         // Populate providerCallId mapping for lookups
         if (call.providerCallId) {

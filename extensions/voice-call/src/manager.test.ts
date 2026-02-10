@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -41,6 +42,54 @@ class FakeProvider implements VoiceCallProvider {
 }
 
 describe("CallManager", () => {
+  it("prunes stale non-terminal calls from persistence on startup", async () => {
+    const now = Date.now();
+    const config = VoiceCallConfigSchema.parse({
+      enabled: true,
+      provider: "plivo",
+      fromNumber: "+15550000000",
+      // keep small so our synthetic startedAt is definitely stale
+      maxDurationSeconds: 1,
+    });
+
+    const storePath = path.join(os.tmpdir(), `openclaw-voice-call-test-${Date.now()}`);
+    await fs.mkdir(storePath, { recursive: true });
+
+    const staleCall = {
+      callId: "stale-call-id",
+      providerCallId: "stale-provider-id",
+      provider: "plivo",
+      direction: "inbound",
+      state: "speaking",
+      from: "+15550001234",
+      to: "+15550000000",
+      startedAt: now - 120_000,
+      transcript: [],
+      processedEventIds: [],
+      metadata: {},
+    };
+
+    await fs.writeFile(path.join(storePath, "calls.jsonl"), `${JSON.stringify(staleCall)}\n`);
+
+    const provider = new FakeProvider();
+    const manager = new CallManager(config, storePath);
+    manager.initialize(provider, "https://example.com/voice/webhook");
+
+    expect(manager.getActiveCalls()).toHaveLength(0);
+
+    // Give the async append a moment to flush.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const content = await fs.readFile(path.join(storePath, "calls.jsonl"), "utf-8");
+    const lines = content.trim().split("\n").filter(Boolean);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+
+    const last = JSON.parse(lines[lines.length - 1] ?? "{}") as Record<string, unknown>;
+    expect(last.state).toBe("timeout");
+    expect(last.endReason).toBe("timeout");
+    expect(typeof last.endedAt).toBe("number");
+  });
+
   it("upgrades providerCallId mapping when provider ID changes", async () => {
     const config = VoiceCallConfigSchema.parse({
       enabled: true,
