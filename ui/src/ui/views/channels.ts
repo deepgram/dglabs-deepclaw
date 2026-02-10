@@ -20,7 +20,12 @@ import { renderDiscordCard } from "./channels.discord.ts";
 import { renderGoogleChatCard } from "./channels.googlechat.ts";
 import { renderIMessageCard } from "./channels.imessage.ts";
 import { renderNostrCard } from "./channels.nostr.ts";
-import { channelEnabled, renderChannelAccountCount } from "./channels.shared.ts";
+import {
+  channelEnabled,
+  channelHasError,
+  deriveChannelStatusLevel,
+  getChannelAccountCount,
+} from "./channels.shared.ts";
 import { renderSignalCard } from "./channels.signal.ts";
 import { renderSlackCard } from "./channels.slack.ts";
 import { renderTelegramCard } from "./channels.telegram.ts";
@@ -50,42 +55,76 @@ export function renderChannels(props: ChannelsProps) {
       return a.order - b.order;
     });
 
+  const channelData: ChannelsChannelData = {
+    whatsapp,
+    telegram,
+    discord,
+    googlechat,
+    slack,
+    signal,
+    imessage,
+    nostr,
+    channelAccounts: props.snapshot?.channelAccounts ?? null,
+  };
+
   return html`
-    <section class="grid grid-cols-2">
-      ${orderedChannels.map((channel) =>
-        renderChannel(channel.key, props, {
-          whatsapp,
-          telegram,
-          discord,
-          googlechat,
-          slack,
-          signal,
-          imessage,
-          nostr,
-          channelAccounts: props.snapshot?.channelAccounts ?? null,
-        }),
-      )}
+    <section class="channel-list">
+      ${orderedChannels.map((channel) => {
+        const hasError = channelHasError(channel.key, props);
+        const statusLevel = deriveChannelStatusLevel(channel.key, props);
+        const label = resolveChannelLabel(props.snapshot, channel.key);
+        const accountCount = getChannelAccountCount(channel.key, props.snapshot?.channelAccounts);
+        const dotClass = statusLevel === "error" ? "" : statusLevel;
+
+        return html`
+          <details class="channel-row ${hasError ? "channel-row--error" : ""}" ?open=${hasError}>
+            <summary class="channel-summary">
+              <span class="channel-summary__dot">
+                <span class="statusDot ${dotClass}"></span>
+              </span>
+              <span class="channel-summary__name">${label}</span>
+              <span class="channel-summary__chips">
+                ${
+                  channel.enabled
+                    ? html`
+                        <span class="chip chip-ok">Active</span>
+                      `
+                    : html`
+                        <span class="chip">Inactive</span>
+                      `
+                }
+                ${
+                  hasError
+                    ? html`
+                        <span class="chip chip-danger">Error</span>
+                      `
+                    : nothing
+                }
+                ${accountCount >= 2 ? html`<span class="chip">${accountCount} accounts</span>` : nothing}
+              </span>
+              <span class="channel-summary__chevron">▸</span>
+            </summary>
+            <div class="channel-detail">
+              ${renderChannel(channel.key, props, channelData)}
+            </div>
+          </details>
+        `;
+      })}
     </section>
 
-    <section class="card" style="margin-top: 18px;">
-      <div class="row" style="justify-content: space-between;">
-        <div>
-          <div class="card-title">Channel health</div>
-          <div class="card-sub">Channel status snapshots from the gateway.</div>
-        </div>
-        <div class="muted">${props.lastSuccessAt ? formatRelativeTimestamp(props.lastSuccessAt) : "n/a"}</div>
-      </div>
+    <details class="channel-debug-toggle">
+      <summary>Channel health snapshot${props.lastSuccessAt ? html` · ${formatRelativeTimestamp(props.lastSuccessAt)}` : nothing}</summary>
       ${
         props.lastError
-          ? html`<div class="callout danger" style="margin-top: 12px;">
+          ? html`<div class="callout danger" style="margin: 12px;">
             ${props.lastError}
           </div>`
           : nothing
       }
-      <pre class="code-block" style="margin-top: 12px;">
+      <pre class="code-block">
 ${props.snapshot ? JSON.stringify(props.snapshot, null, 2) : "No snapshot yet."}
       </pre>
-    </section>
+    </details>
   `;
 }
 
@@ -100,50 +139,42 @@ function resolveChannelOrder(snapshot: ChannelsStatusSnapshot | null): ChannelKe
 }
 
 function renderChannel(key: ChannelKey, props: ChannelsProps, data: ChannelsChannelData) {
-  const accountCountLabel = renderChannelAccountCount(key, data.channelAccounts);
   switch (key) {
     case "whatsapp":
       return renderWhatsAppCard({
         props,
         whatsapp: data.whatsapp,
-        accountCountLabel,
       });
     case "telegram":
       return renderTelegramCard({
         props,
         telegram: data.telegram,
         telegramAccounts: data.channelAccounts?.telegram ?? [],
-        accountCountLabel,
       });
     case "discord":
       return renderDiscordCard({
         props,
         discord: data.discord,
-        accountCountLabel,
       });
     case "googlechat":
       return renderGoogleChatCard({
         props,
         googleChat: data.googlechat,
-        accountCountLabel,
       });
     case "slack":
       return renderSlackCard({
         props,
         slack: data.slack,
-        accountCountLabel,
       });
     case "signal":
       return renderSignalCard({
         props,
         signal: data.signal,
-        accountCountLabel,
       });
     case "imessage":
       return renderIMessageCard({
         props,
         imessage: data.imessage,
-        accountCountLabel,
       });
     case "nostr": {
       const nostrAccounts = data.channelAccounts?.nostr ?? [];
@@ -166,7 +197,6 @@ function renderChannel(key: ChannelKey, props: ChannelsProps, data: ChannelsChan
         props,
         nostr: data.nostr,
         nostrAccounts,
-        accountCountLabel,
         profileFormState: showForm,
         profileFormCallbacks,
         onEditProfile: () => props.onNostrProfileEdit(accountId, profile),
@@ -182,56 +212,48 @@ function renderGenericChannelCard(
   props: ChannelsProps,
   channelAccounts: Record<string, ChannelAccountSnapshot[]>,
 ) {
-  const label = resolveChannelLabel(props.snapshot, key);
   const status = props.snapshot?.channels?.[key] as Record<string, unknown> | undefined;
   const configured = typeof status?.configured === "boolean" ? status.configured : undefined;
   const running = typeof status?.running === "boolean" ? status.running : undefined;
   const connected = typeof status?.connected === "boolean" ? status.connected : undefined;
   const lastError = typeof status?.lastError === "string" ? status.lastError : undefined;
   const accounts = channelAccounts[key] ?? [];
-  const accountCountLabel = renderChannelAccountCount(key, channelAccounts);
 
   return html`
-    <div class="card">
-      <div class="card-title">${label}</div>
-      <div class="card-sub">Channel status and configuration.</div>
-      ${accountCountLabel}
-
-      ${
-        accounts.length > 0
-          ? html`
-            <div class="account-card-list">
-              ${accounts.map((account) => renderGenericAccount(account))}
+    ${
+      accounts.length > 0
+        ? html`
+          <div class="account-card-list">
+            ${accounts.map((account) => renderGenericAccount(account))}
+          </div>
+        `
+        : html`
+          <div class="status-list">
+            <div>
+              <span class="label">Configured</span>
+              <span>${configured == null ? "n/a" : configured ? "Yes" : "No"}</span>
             </div>
-          `
-          : html`
-            <div class="status-list" style="margin-top: 16px;">
-              <div>
-                <span class="label">Configured</span>
-                <span>${configured == null ? "n/a" : configured ? "Yes" : "No"}</span>
-              </div>
-              <div>
-                <span class="label">Running</span>
-                <span>${running == null ? "n/a" : running ? "Yes" : "No"}</span>
-              </div>
-              <div>
-                <span class="label">Connected</span>
-                <span>${connected == null ? "n/a" : connected ? "Yes" : "No"}</span>
-              </div>
+            <div>
+              <span class="label">Running</span>
+              <span>${running == null ? "n/a" : running ? "Yes" : "No"}</span>
             </div>
-          `
-      }
+            <div>
+              <span class="label">Connected</span>
+              <span>${connected == null ? "n/a" : connected ? "Yes" : "No"}</span>
+            </div>
+          </div>
+        `
+    }
 
-      ${
-        lastError
-          ? html`<div class="callout danger" style="margin-top: 12px;">
-            ${lastError}
-          </div>`
-          : nothing
-      }
+    ${
+      lastError
+        ? html`<div class="callout danger" style="margin-top: 12px;">
+          ${lastError}
+        </div>`
+        : nothing
+    }
 
-      ${renderChannelConfigSection({ channelId: key, props })}
-    </div>
+    ${renderChannelConfigSection({ channelId: key, props })}
   `;
 }
 
@@ -246,7 +268,24 @@ function resolveChannelMetaMap(
 
 function resolveChannelLabel(snapshot: ChannelsStatusSnapshot | null, key: string): string {
   const meta = resolveChannelMetaMap(snapshot)[key];
-  return meta?.label ?? snapshot?.channelLabels?.[key] ?? key;
+  if (meta?.label) {
+    return meta.label;
+  }
+  if (snapshot?.channelLabels?.[key]) {
+    return snapshot.channelLabels[key];
+  }
+  // Capitalize the key nicely for display
+  const labels: Record<string, string> = {
+    whatsapp: "WhatsApp",
+    telegram: "Telegram",
+    discord: "Discord",
+    googlechat: "Google Chat",
+    slack: "Slack",
+    signal: "Signal",
+    imessage: "iMessage",
+    nostr: "Nostr",
+  };
+  return labels[key] ?? key;
 }
 
 const RECENT_ACTIVITY_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes

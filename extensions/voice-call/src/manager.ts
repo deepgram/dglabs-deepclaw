@@ -6,6 +6,7 @@ import path from "node:path";
 import type { CallMode, VoiceCallConfig } from "./config.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import { isAllowlistedCaller, normalizePhoneNumber } from "./allowlist.js";
+import { resolveNumberForAgent } from "./config.js";
 import {
   type CallId,
   type CallRecord,
@@ -102,6 +103,7 @@ export class CallManager {
       typeof options === "string" ? { message: options } : (options ?? {});
     const initialMessage = opts.message;
     const mode = opts.mode ?? this.config.outbound.defaultMode;
+    const agentId = opts.agentId;
     if (!this.provider) {
       return { callId: "", success: false, error: "Provider not initialized" };
     }
@@ -125,8 +127,14 @@ export class CallManager {
     }
 
     const callId = crypto.randomUUID();
+    // Resolve from number: agent-specific number > config.fromNumber > mock fallback
+    const agentNumber = agentId
+      ? resolveNumberForAgent(this.config, agentId, "outbound")
+      : undefined;
     const from =
-      this.config.fromNumber || (this.provider?.name === "mock" ? "+15550000000" : undefined);
+      agentNumber ||
+      this.config.fromNumber ||
+      (this.provider?.name === "mock" ? "+15550000000" : undefined);
     if (!from) {
       return { callId: "", success: false, error: "fromNumber not configured" };
     }
@@ -145,6 +153,7 @@ export class CallManager {
       processedEventIds: [],
       metadata: {
         ...(initialMessage && { initialMessage }),
+        ...(agentId && { agentId }),
         mode,
       },
     };

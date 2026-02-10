@@ -5,7 +5,7 @@ import type { CallMode } from "./config.js";
 // Provider Identifiers
 // -----------------------------------------------------------------------------
 
-export const ProviderNameSchema = z.enum(["telnyx", "twilio", "plivo", "mock"]);
+export const ProviderNameSchema = z.enum(["telnyx", "twilio", "plivo", "deepgram", "mock"]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
 // -----------------------------------------------------------------------------
@@ -242,6 +242,8 @@ export type OutboundCallOptions = {
   message?: string;
   /** Call mode (overrides config default) */
   mode?: CallMode;
+  /** Agent ID for outbound call (resolves from number from config.numbers) */
+  agentId?: string;
 };
 
 // -----------------------------------------------------------------------------

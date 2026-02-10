@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { CallMode } from "../config.js";
 import type { CallManagerContext } from "./context.js";
+import { resolveNumberForAgent } from "../config.js";
 import {
   TerminalStates,
   type CallId,
@@ -29,6 +30,7 @@ export async function initiateCall(
     typeof options === "string" ? { message: options } : (options ?? {});
   const initialMessage = opts.message;
   const mode = opts.mode ?? ctx.config.outbound.defaultMode;
+  const agentId = opts.agentId;
 
   if (!ctx.provider) {
     return { callId: "", success: false, error: "Provider not initialized" };
@@ -46,8 +48,12 @@ export async function initiateCall(
   }
 
   const callId = crypto.randomUUID();
+  // Resolve from number: agent-specific number > config.fromNumber > mock fallback
+  const agentNumber = agentId ? resolveNumberForAgent(ctx.config, agentId, "outbound") : undefined;
   const from =
-    ctx.config.fromNumber || (ctx.provider?.name === "mock" ? "+15550000000" : undefined);
+    agentNumber ||
+    ctx.config.fromNumber ||
+    (ctx.provider?.name === "mock" ? "+15550000000" : undefined);
   if (!from) {
     return { callId: "", success: false, error: "fromNumber not configured" };
   }
@@ -65,6 +71,7 @@ export async function initiateCall(
     processedEventIds: [],
     metadata: {
       ...(initialMessage && { initialMessage }),
+      ...(agentId && { agentId }),
       mode,
     },
   };

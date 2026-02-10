@@ -100,9 +100,12 @@ export class MediaStreamHandler {
             console.log("[MediaStream] Twilio connected");
             break;
 
-          case "start":
-            session = await this.handleStart(ws, message, streamToken);
+          case "start": {
+            // Prefer token from Twilio's customParameters (Parameter elements in TwiML)
+            const paramToken = message.start?.customParameters?.token;
+            session = await this.handleStart(ws, message, paramToken ?? streamToken);
             break;
+          }
 
           case "media":
             if (session && message.media?.payload) {
@@ -393,6 +396,7 @@ interface TwilioMediaMessage {
     accountSid: string;
     callSid: string;
     tracks: string[];
+    customParameters?: Record<string, string>;
     mediaFormat: {
       encoding: string;
       sampleRate: number;

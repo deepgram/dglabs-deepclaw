@@ -63,6 +63,48 @@ export const PlivoConfigSchema = z
 export type PlivoConfig = z.infer<typeof PlivoConfigSchema>;
 
 // -----------------------------------------------------------------------------
+// Deepgram-Specific Configuration
+// -----------------------------------------------------------------------------
+
+export const DeepgramLatencyConfigSchema = z
+  .object({
+    fillerThresholdMs: z.number().int().nonnegative().default(1500),
+    fillerPhrases: z.array(z.string()).default([]),
+  })
+  .strict()
+  .default({ fillerThresholdMs: 1500, fillerPhrases: [] });
+export type DeepgramLatencyConfig = z.infer<typeof DeepgramLatencyConfigSchema>;
+
+export const DeepgramFallbackConfigSchema = z
+  .object({
+    openclawTimeoutMs: z.number().int().positive().default(5000),
+    cannedResponses: z.array(z.string()).default([]),
+    maxRetries: z.number().int().nonnegative().default(2),
+  })
+  .strict()
+  .default({ openclawTimeoutMs: 5000, cannedResponses: [], maxRetries: 2 });
+export type DeepgramFallbackConfig = z.infer<typeof DeepgramFallbackConfigSchema>;
+
+export const DeepgramConfigSchema = z
+  .object({
+    apiKey: z.string().min(1).optional(),
+    telephonyProvider: z.enum(["twilio"]).default("twilio"),
+    stt: z
+      .object({ model: z.string().default("nova-3") })
+      .strict()
+      .default({ model: "nova-3" }),
+    tts: z
+      .object({ model: z.string().default("aura-2-thalia-en") })
+      .strict()
+      .default({ model: "aura-2-thalia-en" }),
+    language: z.string().default("en"),
+    latency: DeepgramLatencyConfigSchema,
+    fallback: DeepgramFallbackConfigSchema,
+  })
+  .strict();
+export type DeepgramConfig = z.infer<typeof DeepgramConfigSchema>;
+
+// -----------------------------------------------------------------------------
 // STT/TTS Configuration
 // -----------------------------------------------------------------------------
 
@@ -243,6 +285,18 @@ export const VoiceCallWebhookSecurityConfigSchema = z
 export type WebhookSecurityConfig = z.infer<typeof VoiceCallWebhookSecurityConfigSchema>;
 
 // -----------------------------------------------------------------------------
+// Number Routing Configuration
+// -----------------------------------------------------------------------------
+
+export const NumberRoutingSchema = z
+  .object({
+    agentId: z.string().min(1),
+    direction: z.enum(["inbound", "outbound", "both"]).default("both"),
+  })
+  .strict();
+export type NumberRouting = z.infer<typeof NumberRoutingSchema>;
+
+// -----------------------------------------------------------------------------
 // Outbound Call Configuration
 // -----------------------------------------------------------------------------
 
@@ -306,8 +360,8 @@ export const VoiceCallConfigSchema = z
     /** Enable voice call functionality */
     enabled: z.boolean().default(false),
 
-    /** Active provider (telnyx, twilio, plivo, or mock) */
-    provider: z.enum(["telnyx", "twilio", "plivo", "mock"]).optional(),
+    /** Active provider (telnyx, twilio, plivo, deepgram, or mock) */
+    provider: z.enum(["telnyx", "twilio", "plivo", "deepgram", "mock"]).optional(),
 
     /** Telnyx-specific configuration */
     telnyx: TelnyxConfigSchema.optional(),
@@ -317,6 +371,15 @@ export const VoiceCallConfigSchema = z
 
     /** Plivo-specific configuration */
     plivo: PlivoConfigSchema.optional(),
+
+    /** Deepgram-specific configuration */
+    deepgram: DeepgramConfigSchema.optional(),
+
+    /** Default agent ID for unmapped numbers (defaults to "main") */
+    defaultAgentId: z.string().default("main"),
+
+    /** Map of E.164 phone numbers to agent routing config */
+    numbers: z.record(z.string().regex(/^\+[1-9]\d{1,14}$/), NumberRoutingSchema).default({}),
 
     /** Phone number to call from (E.164) */
     fromNumber: E164Schema.optional(),
@@ -384,6 +447,9 @@ export const VoiceCallConfigSchema = z
     /** Model for generating voice responses (e.g., "anthropic/claude-sonnet-4", "openai/gpt-4o") */
     responseModel: z.string().default("openai/gpt-4o-mini"),
 
+    /** IANA timezone for voice responses (e.g. "America/New_York"). Times are presented in this zone. */
+    timezone: z.string().default("UTC"),
+
     /** System prompt for voice responses */
     responseSystemPrompt: z.string().optional(),
 
@@ -393,6 +459,16 @@ export const VoiceCallConfigSchema = z
   .strict();
 
 export type VoiceCallConfig = z.infer<typeof VoiceCallConfigSchema>;
+
+// -----------------------------------------------------------------------------
+// Caller History Configuration
+// -----------------------------------------------------------------------------
+
+export type CallerHistoryConfig = {
+  lookbackDays: number;
+  maxSessions: number;
+  summaryTokens: number;
+};
 
 // -----------------------------------------------------------------------------
 // Configuration Helpers
@@ -425,6 +501,21 @@ export function resolveVoiceCallConfig(config: VoiceCallConfig): VoiceCallConfig
     resolved.plivo = resolved.plivo ?? {};
     resolved.plivo.authId = resolved.plivo.authId ?? process.env.PLIVO_AUTH_ID;
     resolved.plivo.authToken = resolved.plivo.authToken ?? process.env.PLIVO_AUTH_TOKEN;
+  }
+
+  // Deepgram (hybrid mode: needs both Deepgram + Twilio credentials)
+  if (resolved.provider === "deepgram") {
+    resolved.deepgram = resolved.deepgram ?? ({} as any);
+    resolved.deepgram!.apiKey = resolved.deepgram!.apiKey ?? process.env.DEEPGRAM_API_KEY;
+    // Deepgram hybrid mode uses Twilio for telephony
+    resolved.twilio = resolved.twilio ?? {};
+    resolved.twilio.accountSid = resolved.twilio.accountSid ?? process.env.TWILIO_ACCOUNT_SID;
+    resolved.twilio.authToken = resolved.twilio.authToken ?? process.env.TWILIO_AUTH_TOKEN;
+  }
+
+  // Public URL from environment
+  if (!resolved.publicUrl && process.env.PUBLIC_URL) {
+    resolved.publicUrl = process.env.PUBLIC_URL;
   }
 
   // Tunnel Config
@@ -506,6 +597,24 @@ export function validateProviderConfig(config: VoiceCallConfig): {
     }
   }
 
+  if (config.provider === "deepgram") {
+    if (!config.deepgram?.apiKey) {
+      errors.push(
+        "plugins.entries.voice-call.config.deepgram.apiKey is required (or set DEEPGRAM_API_KEY env)",
+      );
+    }
+    if (!config.twilio?.accountSid) {
+      errors.push(
+        "plugins.entries.voice-call.config.twilio.accountSid is required for Deepgram hybrid mode (or set TWILIO_ACCOUNT_SID env)",
+      );
+    }
+    if (!config.twilio?.authToken) {
+      errors.push(
+        "plugins.entries.voice-call.config.twilio.authToken is required for Deepgram hybrid mode (or set TWILIO_AUTH_TOKEN env)",
+      );
+    }
+  }
+
   if (config.provider === "plivo") {
     if (!config.plivo?.authId) {
       errors.push(
@@ -520,4 +629,44 @@ export function validateProviderConfig(config: VoiceCallConfig): {
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Resolve the agent ID for a given phone number and direction.
+ * Looks up the number in config.numbers, checks direction match, falls back to defaultAgentId.
+ */
+export function resolveAgentForNumber(
+  config: VoiceCallConfig,
+  phoneNumber: string | undefined,
+  direction: "inbound" | "outbound",
+): string {
+  if (phoneNumber && config.numbers) {
+    const entry = config.numbers[phoneNumber];
+    if (entry && (entry.direction === "both" || entry.direction === direction)) {
+      return entry.agentId;
+    }
+  }
+  return config.defaultAgentId;
+}
+
+/**
+ * Find the phone number configured for a given agent ID and direction.
+ * Used for outbound calls to determine which number to call from.
+ */
+export function resolveNumberForAgent(
+  config: VoiceCallConfig,
+  agentId: string,
+  direction: "outbound" | "inbound",
+): string | undefined {
+  if (config.numbers) {
+    for (const [number, entry] of Object.entries(config.numbers)) {
+      if (
+        entry.agentId === agentId &&
+        (entry.direction === "both" || entry.direction === direction)
+      ) {
+        return number;
+      }
+    }
+  }
+  return undefined;
 }

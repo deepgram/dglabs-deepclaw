@@ -5,6 +5,15 @@
       "label": "Provider",
       "help": "Use twilio, telnyx, or mock for dev/no-network."
     },
+    "defaultAgentId": {
+      "label": "Default Agent ID",
+      "help": "Fallback agent for unmapped phone numbers (defaults to 'main')"
+    },
+    "numbers": {
+      "label": "Phone Number Routing",
+      "help": "Map phone numbers to agents (E.164 format)",
+      "advanced": true
+    },
     "fromNumber": {
       "label": "From Number",
       "placeholder": "+15550001234"
@@ -40,6 +49,26 @@
     "twilio.authToken": {
       "label": "Twilio Auth Token",
       "sensitive": true
+    },
+    "deepgram.apiKey": {
+      "label": "Deepgram API Key",
+      "sensitive": true
+    },
+    "deepgram.telephonyProvider": {
+      "label": "Telephony Provider",
+      "advanced": true
+    },
+    "deepgram.stt.model": {
+      "label": "Deepgram STT Model",
+      "advanced": true
+    },
+    "deepgram.tts.model": {
+      "label": "Deepgram TTS Model",
+      "advanced": true
+    },
+    "deepgram.language": {
+      "label": "Deepgram Language",
+      "advanced": true
     },
     "outbound.defaultMode": {
       "label": "Default Call Mode"
@@ -168,7 +197,7 @@
       },
       "provider": {
         "type": "string",
-        "enum": ["telnyx", "twilio", "plivo", "mock"]
+        "enum": ["telnyx", "twilio", "plivo", "deepgram", "mock"]
       },
       "telnyx": {
         "type": "object",
@@ -207,6 +236,65 @@
           "authToken": {
             "type": "string"
           }
+        }
+      },
+      "deepgram": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": { "type": "string" },
+          "telephonyProvider": { "type": "string", "enum": ["twilio"] },
+          "stt": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "model": { "type": "string" }
+            }
+          },
+          "tts": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "model": { "type": "string" }
+            }
+          },
+          "language": { "type": "string" },
+          "latency": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "fillerThresholdMs": { "type": "integer", "minimum": 0 },
+              "fillerPhrases": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "fallback": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "openclawTimeoutMs": { "type": "integer", "minimum": 1 },
+              "cannedResponses": { "type": "array", "items": { "type": "string" } },
+              "maxRetries": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      },
+      "defaultAgentId": {
+        "type": "string",
+        "default": "main"
+      },
+      "numbers": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "agentId": { "type": "string" },
+            "direction": {
+              "type": "string",
+              "enum": ["inbound", "outbound", "both"],
+              "default": "both"
+            }
+          },
+          "required": ["agentId"]
         }
       },
       "fromNumber": {
@@ -546,6 +634,10 @@
       },
       "responseModel": {
         "type": "string"
+      },
+      "timezone": {
+        "type": "string",
+        "default": "UTC"
       },
       "responseSystemPrompt": {
         "type": "string"

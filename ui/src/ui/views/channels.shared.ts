@@ -36,3 +36,46 @@ export function renderChannelAccountCount(
   }
   return html`<div class="account-count">Accounts (${count})</div>`;
 }
+
+/**
+ * Check if a channel has any error (top-level or account-level).
+ */
+export function channelHasError(key: ChannelKey, props: ChannelsProps): boolean {
+  const channels = props.snapshot?.channels as Record<string, unknown> | null;
+  const status = channels?.[key] as Record<string, unknown> | undefined;
+  if (typeof status?.lastError === "string" && status.lastError) {
+    return true;
+  }
+  const accounts = props.snapshot?.channelAccounts?.[key] ?? [];
+  return accounts.some((account) => !!account.lastError);
+}
+
+/**
+ * Derive the status level for the summary row dot.
+ */
+export function deriveChannelStatusLevel(
+  key: ChannelKey,
+  props: ChannelsProps,
+): "ok" | "warn" | "error" | "off" {
+  if (channelHasError(key, props)) {
+    return "error";
+  }
+  const channels = props.snapshot?.channels as Record<string, unknown> | null;
+  const status = channels?.[key] as Record<string, unknown> | undefined;
+  const configured = typeof status?.configured === "boolean" && status.configured;
+  const running = typeof status?.running === "boolean" && status.running;
+  const connected = typeof status?.connected === "boolean" && status.connected;
+
+  // Also check account-level status
+  const accounts = props.snapshot?.channelAccounts?.[key] ?? [];
+  const anyAccountRunning = accounts.some((a) => a.running);
+  const anyAccountConfigured = accounts.some((a) => a.configured);
+
+  if (running || connected || anyAccountRunning) {
+    return "ok";
+  }
+  if (configured || anyAccountConfigured) {
+    return "warn";
+  }
+  return "off";
+}
