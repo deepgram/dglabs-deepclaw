@@ -1216,6 +1216,9 @@ export function renderApp(state: AppViewState) {
             : nothing
         }
       </main>
+      <footer class="shell-footer">
+        <span class="shell-footer__text">&copy; ${new Date().getFullYear()} Deepgram Labs</span>
+      </footer>
       ${renderMobileTabBar(state, state.mobileMoreOpen, () => state.handleToggleMobileMore())}
       ${renderExecApprovalPrompt(state)}
       ${renderGatewayUrlConfirmation(state)}
