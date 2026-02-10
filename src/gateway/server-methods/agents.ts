@@ -77,26 +77,42 @@ async function statFile(filePath: string): Promise<FileMeta | null> {
   }
 }
 
+async function isSymlink(filePath: string): Promise<boolean> {
+  try {
+    const lst = await fs.lstat(filePath);
+    return lst.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 async function listAgentFiles(workspaceDir: string) {
   const files: Array<{
     name: string;
     path: string;
     missing: boolean;
+    inherited?: boolean;
     size?: number;
     updatedAtMs?: number;
   }> = [];
 
   for (const name of BOOTSTRAP_FILE_NAMES) {
     const filePath = path.join(workspaceDir, name);
+    const symlink = await isSymlink(filePath);
     const meta = await statFile(filePath);
     if (meta) {
       files.push({
         name,
         path: filePath,
         missing: false,
+        inherited: symlink,
         size: meta.size,
         updatedAtMs: meta.updatedAtMs,
       });
+    } else if (symlink) {
+      // Symlink exists but target is unresolvable (e.g. absolute host path inside Docker).
+      // Still mark as inherited so the UI doesn't show "missing".
+      files.push({ name, path: filePath, missing: false, inherited: true });
     } else {
       files.push({ name, path: filePath, missing: true });
     }
@@ -420,6 +436,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
     const filePath = path.join(workspaceDir, name);
+    const symlink = await isSymlink(filePath);
     const meta = await statFile(filePath);
     if (!meta) {
       respond(
@@ -427,7 +444,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
         {
           agentId,
           workspace: workspaceDir,
-          file: { name, path: filePath, missing: true },
+          file: { name, path: filePath, missing: !symlink, inherited: symlink },
         },
         undefined,
       );
@@ -443,6 +460,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
           name,
           path: filePath,
           missing: false,
+          inherited: symlink,
           size: meta.size,
           updatedAtMs: meta.updatedAtMs,
           content,
