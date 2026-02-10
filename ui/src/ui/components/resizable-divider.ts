@@ -47,6 +47,7 @@ export class ResizableDivider extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.addEventListener("mousedown", this.handleMouseDown);
+    this.addEventListener("touchstart", this.handleTouchStart, { passive: false });
   }
 
   disconnectedCallback() {
@@ -54,6 +55,9 @@ export class ResizableDivider extends LitElement {
     this.removeEventListener("mousedown", this.handleMouseDown);
     document.removeEventListener("mousemove", this.handleMouseMove);
     document.removeEventListener("mouseup", this.handleMouseUp);
+    this.removeEventListener("touchstart", this.handleTouchStart);
+    document.removeEventListener("touchmove", this.handleTouchMove);
+    document.removeEventListener("touchend", this.handleTouchEnd);
   }
 
   private handleMouseDown = (e: MouseEvent) => {
@@ -100,6 +104,57 @@ export class ResizableDivider extends LitElement {
 
     document.removeEventListener("mousemove", this.handleMouseMove);
     document.removeEventListener("mouseup", this.handleMouseUp);
+  };
+
+  private handleTouchStart = (e: TouchEvent) => {
+    if (e.touches.length !== 1) {
+      return;
+    }
+    this.isDragging = true;
+    this.startX = e.touches[0].clientX;
+    this.startRatio = this.splitRatio;
+    this.classList.add("dragging");
+
+    document.addEventListener("touchmove", this.handleTouchMove, { passive: false });
+    document.addEventListener("touchend", this.handleTouchEnd);
+
+    e.preventDefault();
+  };
+
+  private handleTouchMove = (e: TouchEvent) => {
+    if (!this.isDragging || e.touches.length !== 1) {
+      return;
+    }
+
+    const container = this.parentElement;
+    if (!container) {
+      return;
+    }
+
+    const containerWidth = container.getBoundingClientRect().width;
+    const deltaX = e.touches[0].clientX - this.startX;
+    const deltaRatio = deltaX / containerWidth;
+
+    let newRatio = this.startRatio + deltaRatio;
+    newRatio = Math.max(this.minRatio, Math.min(this.maxRatio, newRatio));
+
+    this.dispatchEvent(
+      new CustomEvent("resize", {
+        detail: { splitRatio: newRatio },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+
+    e.preventDefault();
+  };
+
+  private handleTouchEnd = () => {
+    this.isDragging = false;
+    this.classList.remove("dragging");
+
+    document.removeEventListener("touchmove", this.handleTouchMove);
+    document.removeEventListener("touchend", this.handleTouchEnd);
   };
 }
 

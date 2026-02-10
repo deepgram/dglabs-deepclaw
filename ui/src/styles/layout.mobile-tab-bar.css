@@ -1,0 +1,196 @@
+/* ===========================================
+   Mobile Bottom Tab Bar
+   =========================================== */
+
+/* Hidden by default (desktop) */
+.mobile-tab-bar {
+  display: none;
+}
+.mobile-more-backdrop {
+  display: none;
+}
+.mobile-more-sheet {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Hide desktop nav */
+  .nav {
+    display: none !important;
+  }
+
+  /* Show mobile tab bar */
+  .mobile-tab-bar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    background: var(--bg-card, #141420);
+    border-top: 1px solid var(--border, #333);
+    padding: 4px 0;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+    justify-content: space-around;
+    align-items: stretch;
+  }
+
+  .mobile-tab-bar__tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex: 1;
+    min-height: 48px;
+    padding: 6px 4px;
+    background: none;
+    border: none;
+    color: var(--text-dim, #888);
+    cursor: pointer;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 150ms ease;
+  }
+
+  .mobile-tab-bar__tab--active {
+    color: var(--accent, #13ef93);
+  }
+
+  .mobile-tab-bar__icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .mobile-tab-bar__icon svg {
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .mobile-tab-bar__label {
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .mobile-tab-bar__dot {
+    position: absolute;
+    top: 6px;
+    right: calc(50% - 14px);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent, #13ef93);
+  }
+
+  /* Content needs bottom padding to avoid tab bar occlusion */
+  .content {
+    padding-bottom: 72px !important;
+  }
+
+  /* More sheet backdrop */
+  .mobile-more-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  /* More sheet */
+  .mobile-more-sheet {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 51;
+    background: var(--bg-card, #141420);
+    border-top: 1px solid var(--border, #333);
+    border-radius: 16px 16px 0 0;
+    padding: 16px 16px;
+    padding-bottom: max(16px, calc(env(safe-area-inset-bottom) + 64px));
+    max-height: 60vh;
+    overflow-y: auto;
+    gap: 12px;
+    animation: mobile-sheet-up 200ms ease-out;
+  }
+
+  @keyframes mobile-sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  .mobile-more-sheet__group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .mobile-more-sheet__group-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim, #888);
+    padding: 4px 8px;
+  }
+
+  .mobile-more-sheet__group-items {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mobile-more-sheet__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: none;
+    border: none;
+    border-radius: var(--radius-md, 8px);
+    color: var(--text, #eee);
+    cursor: pointer;
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 150ms ease;
+  }
+
+  .mobile-more-sheet__item:active {
+    background: var(--bg-hover, #1a1a2e);
+  }
+
+  .mobile-more-sheet__item--active {
+    color: var(--accent, #13ef93);
+    background: var(--bg-hover, #1a1a2e);
+  }
+
+  .mobile-more-sheet__item .mobile-tab-bar__icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Hide tab bar in focus modes */
+  .shell--chat-focus .mobile-tab-bar,
+  .shell--onboarding .mobile-tab-bar {
+    display: none;
+  }
+
+  .shell--chat-focus .content,
+  .shell--onboarding .content {
+    padding-bottom: 16px !important;
+  }
+}

@@ -299,6 +299,16 @@
     width: 12px;
     height: 12px;
   }
+
+  /* Touch-friendly button targets */
+  .btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .chat-compose__actions .btn {
+    min-height: 44px;
+  }
 }
 
 /* Small mobile */
@@ -370,5 +380,27 @@
   .theme-icon {
     width: 11px;
     height: 11px;
+  }
+}
+
+/* Touch devices: always show hover-revealed controls */
+@media (hover: none) {
+  .chat-msg__actions {
+    opacity: 1;
+  }
+}
+
+/* Keyboard-aware layout */
+@media (max-width: 768px) {
+  .keyboard-open .mobile-tab-bar {
+    display: none !important;
+  }
+
+  .keyboard-open .content {
+    padding-bottom: 16px !important;
+  }
+
+  .keyboard-open .chat-compose {
+    padding-bottom: env(safe-area-inset-bottom, 4px);
   }
 }
