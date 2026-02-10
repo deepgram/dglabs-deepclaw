@@ -34,3 +34,12 @@ export type CronFormState = {
   deliveryTo: string;
   timeoutSeconds: string;
 };
+
+export type AddAgentFormState = {
+  name: string;
+  emoji: string;
+  workspace: string;
+  agentType: "text" | "voice";
+  voice: string;
+  greeting: string;
+};

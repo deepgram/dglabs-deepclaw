@@ -18,6 +18,7 @@ import { loadDebug } from "./controllers/debug.ts";
 import { loadDevices } from "./controllers/devices.ts";
 import { loadExecApprovals } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
+import { loadModelCatalog } from "./controllers/model-catalog.ts";
 import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
@@ -203,6 +204,7 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "agents") {
     await loadAgents(host as unknown as OpenClawApp);
     await loadConfig(host as unknown as OpenClawApp);
+    void loadModelCatalog(host as unknown as OpenClawApp);
     const agentIds = host.agentsList?.agents?.map((entry) => entry.id) ?? [];
     if (agentIds.length > 0) {
       void loadAgentIdentities(host as unknown as OpenClawApp, agentIds);

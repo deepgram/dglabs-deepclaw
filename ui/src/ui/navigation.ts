@@ -10,6 +10,8 @@ export const TAB_GROUPS = [
   { label: "Settings", tabs: ["config", "debug", "logs"] },
 ] as const;
 
+export const MOBILE_PRIMARY_TABS: Tab[] = ["chat", "overview", "channels", "agents"];
+
 export type Tab =
   | "agents"
   | "overview"

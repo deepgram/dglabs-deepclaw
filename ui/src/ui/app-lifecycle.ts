@@ -17,6 +17,7 @@ import {
   syncTabWithLocation,
   syncThemeWithSettings,
 } from "./app-settings.ts";
+import { observeVirtualKeyboard } from "./mobile-keyboard.ts";
 
 type LifecycleHost = {
   basePath: string;
@@ -32,6 +33,7 @@ type LifecycleHost = {
   logsEntries: unknown[];
   popStateHandler: () => void;
   topbarObserver: ResizeObserver | null;
+  keyboardCleanup: (() => void) | null;
 };
 
 export function handleConnected(host: LifecycleHost) {
@@ -49,6 +51,9 @@ export function handleConnected(host: LifecycleHost) {
   if (host.tab === "debug") {
     startDebugPolling(host as unknown as Parameters<typeof startDebugPolling>[0]);
   }
+  host.keyboardCleanup = observeVirtualKeyboard(({ isOpen }) => {
+    document.documentElement.classList.toggle("keyboard-open", isOpen);
+  });
 }
 
 export function handleFirstUpdated(host: LifecycleHost) {
@@ -56,6 +61,8 @@ export function handleFirstUpdated(host: LifecycleHost) {
 }
 
 export function handleDisconnected(host: LifecycleHost) {
+  host.keyboardCleanup?.();
+  host.keyboardCleanup = null;
   window.removeEventListener("popstate", host.popStateHandler);
   stopNodesPolling(host as unknown as Parameters<typeof stopNodesPolling>[0]);
   stopLogsPolling(host as unknown as Parameters<typeof stopLogsPolling>[0]);

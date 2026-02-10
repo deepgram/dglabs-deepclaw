@@ -179,8 +179,20 @@ export const configHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, parsedRes.error));
       return;
     }
-    const validated = validateConfigObjectWithPlugins(parsedRes.parsed);
+    let restoredParsed: unknown;
+    try {
+      restoredParsed = restoreRedactedValues(parsedRes.parsed, snapshot.config);
+    } catch (err) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, String(err instanceof Error ? err.message : err)),
+      );
+      return;
+    }
+    const validated = validateConfigObjectWithPlugins(restoredParsed);
     if (!validated.ok) {
+      console.error("[config.set] validation failed:", JSON.stringify(validated.issues, null, 2));
       respond(
         false,
         undefined,
@@ -190,27 +202,13 @@ export const configHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    let restored: typeof validated.config;
-    try {
-      restored = restoreRedactedValues(
-        validated.config,
-        snapshot.config,
-      ) as typeof validated.config;
-    } catch (err) {
-      respond(
-        false,
-        undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, String(err instanceof Error ? err.message : err)),
-      );
-      return;
-    }
-    await writeConfigFile(restored);
+    await writeConfigFile(validated.config);
     respond(
       true,
       {
         ok: true,
         path: CONFIG_PATH,
-        config: redactConfigObject(restored),
+        config: redactConfigObject(validated.config),
       },
       undefined,
     );

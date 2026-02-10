@@ -22,6 +22,7 @@ import type {
   HealthSnapshot,
   LogEntry,
   LogLevel,
+  ModelCatalogEntry,
   NostrProfile,
   PresenceEntry,
   SessionsUsageResult,
@@ -31,7 +32,12 @@ import type {
   SkillStatusReport,
   StatusSummary,
 } from "./types.ts";
-import type { ChatAttachment, ChatQueueItem, CronFormState } from "./ui-types.ts";
+import type {
+  AddAgentFormState,
+  ChatAttachment,
+  ChatQueueItem,
+  CronFormState,
+} from "./ui-types.ts";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import type { SessionLogEntry } from "./views/usage.ts";
 
@@ -72,6 +78,8 @@ export type AppViewState = {
   sidebarContent: string | null;
   sidebarError: string | null;
   splitRatio: number;
+  mobileMoreOpen: boolean;
+  handleToggleMobileMore: () => void;
   scrollToBottom: (opts?: { smooth?: boolean }) => void;
   devicesLoading: boolean;
   devicesError: string | null;
@@ -142,6 +150,15 @@ export type AppViewState = {
   agentSkillsError: string | null;
   agentSkillsReport: SkillStatusReport | null;
   agentSkillsAgentId: string | null;
+  agentModelCatalog: ModelCatalogEntry[];
+  agentModelCatalogLoading: boolean;
+  identityDraftName: string | null;
+  identityDraftEmoji: string | null;
+  identitySaving: boolean;
+  addAgentModalOpen: boolean;
+  addAgentForm: AddAgentFormState;
+  addAgentBusy: boolean;
+  addAgentError: string | null;
   sessionsLoading: boolean;
   sessionsResult: SessionsListResult | null;
   sessionsError: string | null;
@@ -264,6 +281,10 @@ export type AppViewState = {
   handleLoadNodes: () => Promise<void>;
   handleLoadPresence: () => Promise<void>;
   handleLoadSkills: () => Promise<void>;
+  handleAddAgentOpen: () => void;
+  handleAddAgentClose: () => void;
+  handleAddAgentFormChange: (patch: Partial<AddAgentFormState>) => void;
+  handleAddAgentSubmit: () => Promise<void>;
   handleLoadDebug: () => Promise<void>;
   handleLoadLogs: () => Promise<void>;
   handleDebugCall: () => Promise<void>;

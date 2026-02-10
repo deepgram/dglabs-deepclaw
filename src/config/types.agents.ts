@@ -21,6 +21,7 @@ export type AgentModelConfig =
 export type AgentConfig = {
   id: string;
   default?: boolean;
+  agentType?: "text" | "voice";
   name?: string;
   workspace?: string;
   agentDir?: string;

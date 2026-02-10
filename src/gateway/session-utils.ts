@@ -290,7 +290,7 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
   const scope = cfg.session?.scope ?? "per-sender";
   const configuredById = new Map<
     string,
-    { name?: string; identity?: GatewayAgentRow["identity"] }
+    { name?: string; agentType?: "text" | "voice"; identity?: GatewayAgentRow["identity"] }
   >();
   for (const entry of cfg.agents?.list ?? []) {
     if (!entry?.id) {
@@ -311,6 +311,7 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
       : undefined;
     configuredById.set(normalizeAgentId(entry.id), {
       name: typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : undefined,
+      agentType: entry.agentType,
       identity,
     });
   }
@@ -328,13 +329,31 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
   }
   const agents = agentIds.map((id) => {
     const meta = configuredById.get(id);
+    const agentType = meta?.agentType ?? inferAgentTypeFromIdentity(cfg, id);
     return {
       id,
       name: meta?.name,
+      ...(agentType ? { agentType } : {}),
       identity: meta?.identity,
     };
   });
   return { defaultId, mainKey, scope, agents };
+}
+
+/**
+ * Infer agentType from IDENTITY.md for agents that predate the agentType config field.
+ * Returns "voice" if a `Voice:` line is found, otherwise undefined (treated as "text").
+ */
+function inferAgentTypeFromIdentity(cfg: OpenClawConfig, agentId: string): "voice" | undefined {
+  try {
+    const workspace = resolveAgentWorkspaceDir(cfg, agentId);
+    const content = fs.readFileSync(path.join(workspace, "IDENTITY.md"), "utf-8");
+    return /^\s*-?\s*(?:\*{1,2}|_{1,2})?voice(?:\*{1,2}|_{1,2})?\s*:/im.test(content)
+      ? "voice"
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function canonicalizeSessionKeyForAgent(agentId: string, key: string): string {

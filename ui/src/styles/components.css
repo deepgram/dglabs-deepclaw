@@ -1800,6 +1800,11 @@
   border-color: var(--warn);
 }
 
+.agent-pill.voice {
+  color: #a78bfa;
+  border-color: #a78bfa;
+}
+
 .agent-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

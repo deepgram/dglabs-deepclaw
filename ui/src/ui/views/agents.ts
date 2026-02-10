@@ -8,6 +8,7 @@ import type {
   ChannelsStatusSnapshot,
   CronJob,
   CronStatus,
+  ModelCatalogEntry,
   SkillStatusEntry,
   SkillStatusReport,
 } from "../types.ts";
@@ -23,6 +24,7 @@ import {
   formatCronState,
   formatNextRun,
 } from "../presenter.ts";
+import { renderEmojiPicker } from "./emoji-picker.ts";
 
 export type AgentsPanel = "overview" | "files" | "tools" | "skills" | "channels" | "cron";
 
@@ -54,11 +56,21 @@ export type AgentsProps = {
   agentIdentityLoading: boolean;
   agentIdentityError: string | null;
   agentIdentityById: Record<string, AgentIdentityResult>;
+  identityDraftName: string | null;
+  identityDraftEmoji: string | null;
+  identitySaving: boolean;
+  onIdentityNameChange: (value: string) => void;
+  onIdentityEmojiChange: (value: string) => void;
+  onIdentitySave: (agentId: string) => void;
+  onIdentityReset: () => void;
   agentSkillsLoading: boolean;
   agentSkillsReport: SkillStatusReport | null;
   agentSkillsError: string | null;
   agentSkillsAgentId: string | null;
   skillsFilter: string;
+  modelCatalog: ModelCatalogEntry[];
+  modelCatalogLoading: boolean;
+  onModelCatalogRefresh: () => void;
   onRefresh: () => void;
   onSelectAgent: (agentId: string) => void;
   onSelectPanel: (panel: AgentsPanel) => void;
@@ -73,6 +85,7 @@ export type AgentsProps = {
   onConfigSave: () => void;
   onModelChange: (agentId: string, modelId: string | null) => void;
   onModelFallbacksChange: (agentId: string, fallbacks: string[]) => void;
+  onAgentTypeChange: (agentId: string, agentType: "text" | "voice") => void;
   onChannelsRefresh: () => void;
   onCronRefresh: () => void;
   onSkillsFilterChange: (next: string) => void;
@@ -80,6 +93,7 @@ export type AgentsProps = {
   onAgentSkillToggle: (agentId: string, skillName: string, enabled: boolean) => void;
   onAgentSkillsClear: (agentId: string) => void;
   onAgentSkillsDisableAll: (agentId: string) => void;
+  onAddAgentOpen: () => void;
 };
 
 const TOOL_SECTIONS = [
@@ -296,6 +310,7 @@ type AgentContext = {
   identityEmoji: string;
   skillsLabel: string;
   isDefault: boolean;
+  agentType: string;
 };
 
 function buildAgentContext(
@@ -329,6 +344,7 @@ function buildAgentContext(
     identityEmoji,
     skillsLabel: skillFilter ? `${skillCount} selected` : "all skills",
     isDefault: Boolean(defaultId && agent.id === defaultId),
+    agentType: agent.agentType === "voice" ? "Voice" : "Text",
   };
 }
 
@@ -451,6 +467,96 @@ function buildModelOptions(configForm: Record<string, unknown> | null, current?:
   return options.map((option) => html`<option value=${option.value}>${option.label}</option>`);
 }
 
+function formatModelBadges(entry: ModelCatalogEntry): string {
+  const badges: string[] = [];
+  if (entry.reasoning) {
+    badges.push("[reasoning]");
+  }
+  if (entry.input && entry.input.includes("image")) {
+    badges.push("[vision]");
+  }
+  if (entry.contextWindow && entry.contextWindow > 0) {
+    const k = Math.round(entry.contextWindow / 1024);
+    badges.push(`[${k}k]`);
+  }
+  return badges.length > 0 ? ` ${badges.join(" ")}` : "";
+}
+
+function matchesCatalogEntry(current: string, entry: ModelCatalogEntry): boolean {
+  if (current === entry.id) {
+    return true;
+  }
+  // Check bare model id (without provider prefix)
+  const slashIdx = entry.id.indexOf("/");
+  if (slashIdx > 0) {
+    const bareId = entry.id.slice(slashIdx + 1);
+    if (current === bareId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildCatalogModelOptions(
+  catalog: ModelCatalogEntry[],
+  configForm: Record<string, unknown> | null,
+  current?: string | null,
+) {
+  // Group catalog entries by provider
+  const groups = new Map<string, ModelCatalogEntry[]>();
+  for (const entry of catalog) {
+    const provider = entry.provider || "other";
+    let list = groups.get(provider);
+    if (!list) {
+      list = [];
+      groups.set(provider, list);
+    }
+    list.push(entry);
+  }
+
+  // Check if current model is in the catalog
+  const currentInCatalog = current
+    ? catalog.some((entry) => matchesCatalogEntry(current, entry))
+    : false;
+
+  // Include config-based models not in catalog
+  const configModels = resolveConfiguredModels(configForm);
+  const extraConfigModels = configModels.filter(
+    (opt) => !catalog.some((entry) => matchesCatalogEntry(opt.value, entry)),
+  );
+
+  const parts = [];
+
+  // If current model is not in catalog or config models, add it
+  if (current && !currentInCatalog && !extraConfigModels.some((opt) => opt.value === current)) {
+    parts.push(html`<option value=${current}>Current (${current})</option>`);
+  }
+
+  // Config-only models not found in catalog
+  if (extraConfigModels.length > 0) {
+    parts.push(html`
+      <optgroup label="Config Models">
+        ${extraConfigModels.map((opt) => html`<option value=${opt.value}>${opt.label}</option>`)}
+      </optgroup>
+    `);
+  }
+
+  // Catalog models grouped by provider
+  for (const [provider, entries] of groups) {
+    parts.push(html`
+      <optgroup label=${provider}>
+        ${entries.map((entry) => {
+          const badges = formatModelBadges(entry);
+          const label = `${entry.name}${badges}`;
+          return html`<option value=${entry.id}>${label}</option>`;
+        })}
+      </optgroup>
+    `);
+  }
+
+  return parts;
+}
+
 type CompiledPattern =
   | { kind: "all" }
   | { kind: "exact"; value: string }
@@ -550,9 +656,14 @@ export function renderAgents(props: AgentsProps) {
             <div class="card-title">Agents</div>
             <div class="card-sub">${agents.length} configured.</div>
           </div>
-          <button class="btn btn--sm" ?disabled=${props.loading} @click=${props.onRefresh}>
-            ${props.loading ? "Loading…" : "Refresh"}
-          </button>
+          <div class="row" style="gap: 8px;">
+            <button class="btn btn--sm" @click=${props.onAddAgentOpen}>
+              + Add
+            </button>
+            <button class="btn btn--sm" ?disabled=${props.loading} @click=${props.onRefresh}>
+              ${props.loading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
         </div>
         ${
           props.error
@@ -567,6 +678,7 @@ export function renderAgents(props: AgentsProps) {
                 `
               : agents.map((agent) => {
                   const badge = agentBadgeText(agent.id, defaultId);
+                  const isVoice = agent.agentType === "voice";
                   const emoji = resolveAgentEmoji(agent, props.agentIdentityById[agent.id] ?? null);
                   return html`
                     <button
@@ -581,7 +693,16 @@ export function renderAgents(props: AgentsProps) {
                         <div class="agent-title">${normalizeAgentLabel(agent)}</div>
                         <div class="agent-sub mono">${agent.id}</div>
                       </div>
-                      ${badge ? html`<span class="agent-pill">${badge}</span>` : nothing}
+                      <div>
+                        ${
+                          isVoice
+                            ? html`
+                                <span class="agent-pill voice">voice</span>
+                              `
+                            : nothing
+                        }
+                        ${badge ? html`<span class="agent-pill">${badge}</span>` : nothing}
+                      </div>
                     </button>
                   `;
                 })
@@ -614,13 +735,24 @@ export function renderAgents(props: AgentsProps) {
                       agentIdentity: props.agentIdentityById[selectedAgent.id] ?? null,
                       agentIdentityError: props.agentIdentityError,
                       agentIdentityLoading: props.agentIdentityLoading,
+                      identityDraftName: props.identityDraftName,
+                      identityDraftEmoji: props.identityDraftEmoji,
+                      identitySaving: props.identitySaving,
+                      onIdentityNameChange: props.onIdentityNameChange,
+                      onIdentityEmojiChange: props.onIdentityEmojiChange,
+                      onIdentitySave: props.onIdentitySave,
+                      onIdentityReset: props.onIdentityReset,
                       configLoading: props.configLoading,
                       configSaving: props.configSaving,
                       configDirty: props.configDirty,
+                      modelCatalog: props.modelCatalog,
+                      modelCatalogLoading: props.modelCatalogLoading,
+                      onModelCatalogRefresh: props.onModelCatalogRefresh,
                       onConfigReload: props.onConfigReload,
                       onConfigSave: props.onConfigSave,
                       onModelChange: props.onModelChange,
                       onModelFallbacksChange: props.onModelFallbacksChange,
+                      onAgentTypeChange: props.onAgentTypeChange,
                     })
                   : nothing
               }
@@ -742,6 +874,13 @@ function renderAgentHeader(
       </div>
       <div class="agent-header-meta">
         <div class="mono">${agent.id}</div>
+        ${
+          agent.agentType === "voice"
+            ? html`
+                <span class="agent-pill voice">voice</span>
+              `
+            : nothing
+        }
         ${badge ? html`<span class="agent-pill">${badge}</span>` : nothing}
       </div>
     </section>
@@ -782,13 +921,24 @@ function renderAgentOverview(params: {
   agentIdentity: AgentIdentityResult | null;
   agentIdentityLoading: boolean;
   agentIdentityError: string | null;
+  identityDraftName: string | null;
+  identityDraftEmoji: string | null;
+  identitySaving: boolean;
+  onIdentityNameChange: (value: string) => void;
+  onIdentityEmojiChange: (value: string) => void;
+  onIdentitySave: (agentId: string) => void;
+  onIdentityReset: () => void;
   configLoading: boolean;
   configSaving: boolean;
   configDirty: boolean;
+  modelCatalog: ModelCatalogEntry[];
+  modelCatalogLoading: boolean;
+  onModelCatalogRefresh: () => void;
   onConfigReload: () => void;
   onConfigSave: () => void;
   onModelChange: (agentId: string, modelId: string | null) => void;
   onModelFallbacksChange: (agentId: string, fallbacks: string[]) => void;
+  onAgentTypeChange: (agentId: string, agentType: "text" | "voice") => void;
 }) {
   const {
     agent,
@@ -797,13 +947,24 @@ function renderAgentOverview(params: {
     agentIdentity,
     agentIdentityLoading,
     agentIdentityError,
+    identityDraftName,
+    identityDraftEmoji,
+    identitySaving,
+    onIdentityNameChange,
+    onIdentityEmojiChange,
+    onIdentitySave,
+    onIdentityReset,
     configLoading,
     configSaving,
     configDirty,
+    modelCatalog,
+    modelCatalogLoading,
+    onModelCatalogRefresh,
     onConfigReload,
     onConfigSave,
     onModelChange,
     onModelFallbacksChange,
+    onAgentTypeChange,
   } = params;
   const config = resolveAgentConfig(configForm, agent.id);
   const workspaceFromFiles =
@@ -829,7 +990,6 @@ function renderAgentOverview(params: {
     config.entry?.name ||
     "-";
   const resolvedEmoji = resolveAgentEmoji(agent, agentIdentity);
-  const identityEmoji = resolvedEmoji || "-";
   const skillFilter = Array.isArray(config.entry?.skills) ? config.entry?.skills : null;
   const skillCount = skillFilter?.length ?? null;
   const identityStatus = agentIdentityLoading
@@ -854,7 +1014,23 @@ function renderAgentOverview(params: {
         </div>
         <div class="agent-kv">
           <div class="label">Identity Name</div>
-          <div>${identityName}</div>
+          <input
+            class="identity-inline-input"
+            .value=${identityDraftName ?? identityName}
+            ?disabled=${identitySaving}
+            @input=${(e: Event) => onIdentityNameChange((e.target as HTMLInputElement).value)}
+            placeholder="Agent name"
+            style="
+              width: 100%;
+              font: inherit;
+              color: inherit;
+              background: var(--bg-secondary, rgba(255,255,255,0.06));
+              border: 1px solid var(--border, rgba(255,255,255,0.1));
+              border-radius: 4px;
+              padding: 4px 8px;
+              margin-top: 2px;
+            "
+          />
           ${identityStatus ? html`<div class="agent-kv-sub muted">${identityStatus}</div>` : nothing}
         </div>
         <div class="agent-kv">
@@ -862,14 +1038,57 @@ function renderAgentOverview(params: {
           <div>${isDefault ? "yes" : "no"}</div>
         </div>
         <div class="agent-kv">
+          <div class="label">Agent Type</div>
+          <select
+            .value=${agent.agentType === "voice" ? "voice" : "text"}
+            ?disabled=${!configForm || configLoading || configSaving}
+            @change=${(e: Event) =>
+              onAgentTypeChange(
+                agent.id,
+                (e.target as HTMLSelectElement).value === "voice" ? "voice" : "text",
+              )}
+          >
+            <option value="text">Text</option>
+            <option value="voice">Voice</option>
+          </select>
+        </div>
+        <div class="agent-kv" style="grid-column: span 2;">
           <div class="label">Identity Emoji</div>
-          <div>${identityEmoji}</div>
+          <div style="margin-top: 6px;">
+            ${renderEmojiPicker({
+              selected: identityDraftEmoji ?? resolvedEmoji,
+              disabled: identitySaving,
+              onSelect: (emoji) => onIdentityEmojiChange(emoji),
+            })}
+          </div>
         </div>
         <div class="agent-kv">
           <div class="label">Skills Filter</div>
           <div>${skillFilter ? `${skillCount} selected` : "all skills"}</div>
         </div>
       </div>
+      ${
+        identityDraftName != null || identityDraftEmoji != null
+          ? html`
+              <div class="row" style="gap: 8px; margin-top: 12px;">
+                <button
+                  class="btn btn--sm primary"
+                  ?disabled=${identitySaving}
+                  @click=${() => onIdentitySave(agent.id)}
+                >
+                  ${identitySaving ? "Saving…" : "Save Identity"}
+                </button>
+                <button
+                  class="btn btn--sm"
+                  ?disabled=${identitySaving}
+                  @click=${onIdentityReset}
+                >
+                  Reset
+                </button>
+              </div>
+            `
+          : nothing
+      }
 
       <div class="agent-model-select" style="margin-top: 20px;">
         <div class="label">Model Selection</div>
@@ -893,7 +1112,15 @@ function renderAgentOverview(params: {
                       </option>
                     `
               }
-              ${buildModelOptions(configForm, effectivePrimary ?? undefined)}
+              ${
+                modelCatalog.length > 0
+                  ? buildCatalogModelOptions(
+                      modelCatalog,
+                      configForm,
+                      effectivePrimary ?? undefined,
+                    )
+                  : buildModelOptions(configForm, effectivePrimary ?? undefined)
+              }
             </select>
           </label>
           <label class="field" style="min-width: 260px; flex: 1;">
@@ -911,6 +1138,14 @@ function renderAgentOverview(params: {
           </label>
         </div>
         <div class="row" style="justify-content: flex-end; gap: 8px;">
+          <button
+            class="btn btn--sm"
+            ?disabled=${modelCatalogLoading}
+            @click=${onModelCatalogRefresh}
+            title="Refresh model catalog"
+          >
+            ${modelCatalogLoading ? "Refreshing…" : "Refresh Models"}
+          </button>
           <button
             class="btn btn--sm"
             ?disabled=${configLoading}
@@ -960,6 +1195,10 @@ function renderAgentContextCard(context: AgentContext, subtitle: string) {
         <div class="agent-kv">
           <div class="label">Default</div>
           <div>${context.isDefault ? "yes" : "no"}</div>
+        </div>
+        <div class="agent-kv">
+          <div class="label">Agent Type</div>
+          <div>${context.agentType}</div>
         </div>
       </div>
     </section>

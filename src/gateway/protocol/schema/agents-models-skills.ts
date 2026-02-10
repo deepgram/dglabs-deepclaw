@@ -8,6 +8,7 @@ export const ModelChoiceSchema = Type.Object(
     provider: NonEmptyString,
     contextWindow: Type.Optional(Type.Integer({ minimum: 1 })),
     reasoning: Type.Optional(Type.Boolean()),
+    input: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]))),
   },
   { additionalProperties: false },
 );
@@ -16,6 +17,7 @@ export const AgentSummarySchema = Type.Object(
   {
     id: NonEmptyString,
     name: Type.Optional(NonEmptyString),
+    agentType: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("voice")])),
     identity: Type.Optional(
       Type.Object(
         {
@@ -50,6 +52,7 @@ export const AgentsCreateParamsSchema = Type.Object(
     workspace: NonEmptyString,
     emoji: Type.Optional(Type.String()),
     avatar: Type.Optional(Type.String()),
+    agentType: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("voice")])),
   },
   { additionalProperties: false },
 );
@@ -71,6 +74,7 @@ export const AgentsUpdateParamsSchema = Type.Object(
     workspace: Type.Optional(NonEmptyString),
     model: Type.Optional(NonEmptyString),
     avatar: Type.Optional(Type.String()),
+    agentType: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("voice")])),
   },
   { additionalProperties: false },
 );
@@ -164,7 +168,10 @@ export const AgentsFilesSetResultSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const ModelsListParamsSchema = Type.Object({}, { additionalProperties: false });
+export const ModelsListParamsSchema = Type.Object(
+  { refresh: Type.Optional(Type.Boolean()) },
+  { additionalProperties: false },
+);
 
 export const ModelsListResultSchema = Type.Object(
   {
