@@ -13,6 +13,7 @@
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import type { DeepgramLatencyConfig } from "../config.js";
+import { generateFillerPhrase } from "../filler.js";
 
 // ---------------------------------------------------------------------------
 // Types — Deepgram Voice Agent Protocol
@@ -659,15 +660,26 @@ export class DeepgramVoiceAgentClient extends EventEmitter<DeepgramVoiceAgentEve
     const latency = this.config.latency;
     const thresholdMs = latency?.fillerThresholdMs ?? 0;
     const phrases = latency?.fillerPhrases ?? [];
+    const dynamicFiller = latency?.dynamicFiller ?? true;
 
     let fillerTimer: ReturnType<typeof setTimeout> | null = null;
     let completed = false;
 
-    // Start a filler timer only when we have a threshold and phrases.
-    if (thresholdMs > 0 && phrases.length > 0) {
+    // Kick off dynamic filler generation in parallel (if enabled)
+    let dynamicPhrase: string | null = null;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (dynamicFiller && apiKey && thresholdMs > 0) {
+      void generateFillerPhrase({ toolName: fnName, args }, apiKey).then((phrase) => {
+        dynamicPhrase = phrase;
+      });
+    }
+
+    // Start a filler timer only when we have a threshold and phrases (or dynamic filler).
+    if (thresholdMs > 0 && (phrases.length > 0 || dynamicFiller)) {
       fillerTimer = setTimeout(() => {
         if (completed) return;
-        const phrase = phrases[Math.floor(Math.random() * phrases.length)]!;
+        const phrase = dynamicPhrase ?? phrases[Math.floor(Math.random() * phrases.length)];
+        if (!phrase) return;
         console.log(`${LOG_PREFIX} Injecting filler for "${fnName}": "${phrase}"`);
         this.injectAgentMessage(phrase);
         this.emit("fillerInjected", phrase);

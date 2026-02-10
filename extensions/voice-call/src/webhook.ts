@@ -1,18 +1,23 @@
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import http from "node:http";
 import { URL } from "node:url";
+import { WebSocket, WebSocketServer } from "ws";
 import type { VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { DeepgramMediaBridge } from "./deepgram-media-bridge.js";
 import type { CallManager } from "./manager.js";
 import type { MediaStreamConfig } from "./media-stream.js";
 import type { VoiceCallProvider } from "./providers/base.js";
+import type { DeepgramProvider } from "./providers/deepgram.js";
 import type { TwilioProvider } from "./providers/twilio.js";
 import type { NormalizedEvent, WebhookContext } from "./types.js";
+import { generateFillerSet } from "./filler.js";
 import { MediaStreamHandler } from "./media-stream.js";
 import { OpenAIRealtimeSTTProvider } from "./providers/stt-openai-realtime.js";
 
 const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
+const BROWSER_VOICE_PATH = "/voice/web";
 
 /**
  * HTTP server for receiving voice call webhooks from providers.
@@ -29,6 +34,10 @@ export class VoiceCallWebhookServer {
   private mediaStreamHandler: MediaStreamHandler | null = null;
   /** Deepgram media bridge for hybrid mode */
   private deepgramBridge: DeepgramMediaBridge | null = null;
+  /** DeepgramProvider for browser voice in hybrid mode */
+  private hybridDeepgramProvider: DeepgramProvider | null = null;
+  /** WebSocket server for browser voice connections */
+  private browserVoiceWss: WebSocketServer | null = null;
   /** Gateway URL for LLM proxy */
   private gatewayUrl: string | null = null;
   /** Gateway auth token */
@@ -37,6 +46,8 @@ export class VoiceCallWebhookServer {
   private fillerThresholdMs: number = 0;
   /** Filler phrases to randomly pick from when threshold fires */
   private fillerPhrases: string[] = [];
+  /** Whether to generate dynamic filler phrases via Haiku */
+  private dynamicFiller: boolean = true;
 
   constructor(
     config: VoiceCallConfig,
@@ -53,6 +64,7 @@ export class VoiceCallWebhookServer {
     if (config.deepgram?.latency) {
       this.fillerThresholdMs = config.deepgram.latency.fillerThresholdMs ?? 0;
       this.fillerPhrases = config.deepgram.latency.fillerPhrases ?? [];
+      this.dynamicFiller = config.deepgram.latency.dynamicFiller ?? true;
     }
 
     // Initialize media stream handler if streaming is enabled
@@ -70,9 +82,15 @@ export class VoiceCallWebhookServer {
 
   /**
    * Set the Deepgram media bridge for hybrid mode WS routing.
+   *
+   * @param bridge - The bridge handling Twilio media stream ↔ Deepgram
+   * @param deepgramProvider - DeepgramProvider for browser voice sessions
    */
-  setDeepgramMediaBridge(bridge: DeepgramMediaBridge): void {
+  setDeepgramMediaBridge(bridge: DeepgramMediaBridge, deepgramProvider?: DeepgramProvider): void {
     this.deepgramBridge = bridge;
+    if (deepgramProvider) {
+      this.hybridDeepgramProvider = deepgramProvider;
+    }
   }
 
   /**
@@ -218,6 +236,11 @@ export class VoiceCallWebhookServer {
           } else {
             socket.destroy();
           }
+        } else if (
+          url.pathname === BROWSER_VOICE_PATH &&
+          (this.provider.name === "deepgram" || this.deepgramBridge)
+        ) {
+          this.handleBrowserVoiceUpgrade(request, socket, head, url);
         } else {
           socket.destroy();
         }
@@ -231,6 +254,11 @@ export class VoiceCallWebhookServer {
         if (this.mediaStreamHandler) {
           console.log(`[voice-call] Media stream WebSocket on ws://${bind}:${port}${streamPath}`);
         }
+        if (this.provider.name === "deepgram" || this.hybridDeepgramProvider) {
+          console.log(
+            `[voice-call] Browser voice WebSocket on ws://${bind}:${port}${BROWSER_VOICE_PATH}`,
+          );
+        }
         resolve(url);
       });
     });
@@ -240,6 +268,10 @@ export class VoiceCallWebhookServer {
    * Stop the webhook server.
    */
   async stop(): Promise<void> {
+    if (this.browserVoiceWss) {
+      this.browserVoiceWss.close();
+      this.browserVoiceWss = null;
+    }
     return new Promise((resolve) => {
       if (this.server) {
         this.server.close(() => {
@@ -250,6 +282,152 @@ export class VoiceCallWebhookServer {
         resolve();
       }
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Browser Voice WebSocket
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Handle WebSocket upgrade for browser voice connections.
+   * Creates a Deepgram Voice Agent session bridged to the browser.
+   *
+   * Protocol:
+   *  - Client sends binary frames (PCM/linear16 audio from browser mic)
+   *  - Server sends binary frames (synthesized audio from Deepgram TTS)
+   *  - Client sends JSON text frames for control: { type: "close" }
+   *  - Server sends JSON text frames for events:
+   *    { type: "conversationText", role, content }
+   *    { type: "agentStartedSpeaking" }
+   *    { type: "userStartedSpeaking" }
+   *    { type: "agentAudioDone" }
+   *    { type: "error", message }
+   *    { type: "connected" }
+   */
+  private handleBrowserVoiceUpgrade(
+    request: http.IncomingMessage,
+    socket: import("node:stream").Duplex,
+    head: Buffer,
+    url: URL,
+  ): void {
+    if (!this.browserVoiceWss) {
+      this.browserVoiceWss = new WebSocketServer({ noServer: true });
+    }
+
+    this.browserVoiceWss.handleUpgrade(request, socket, head, (ws) => {
+      void this.handleBrowserVoiceConnection(ws, url);
+    });
+  }
+
+  private async handleBrowserVoiceConnection(ws: WebSocket, url: URL): Promise<void> {
+    const token = url.searchParams.get("token") ?? undefined;
+
+    // Basic token validation (if gateway token is set, require it)
+    const expectedToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+    if (expectedToken && token !== expectedToken) {
+      console.warn("[voice-call] Browser voice connection rejected: invalid token");
+      ws.close(1008, "Unauthorized");
+      return;
+    }
+
+    // In direct Deepgram mode, provider IS the DeepgramProvider.
+    // In hybrid mode, use the stored hybridDeepgramProvider.
+    const dgProvider =
+      this.provider.name === "deepgram"
+        ? (this.provider as DeepgramProvider)
+        : this.hybridDeepgramProvider;
+
+    if (!dgProvider) {
+      ws.close(1008, "Browser voice requires Deepgram provider");
+      return;
+    }
+    const callId = `web-${crypto.randomUUID()}`;
+
+    console.log(`[voice-call] Browser voice session started: ${callId}`);
+
+    try {
+      const client = await dgProvider.createSession(callId, callId);
+
+      // Send connected event to browser
+      this.sendBrowserEvent(ws, { type: "connected", callId });
+
+      // Bridge: Deepgram audio → browser
+      client.on("audio", (audio) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(audio);
+        }
+      });
+
+      // Bridge: Deepgram events → browser
+      client.on("conversationText", (role, content) => {
+        this.sendBrowserEvent(ws, { type: "conversationText", role, content });
+      });
+
+      client.on("userStartedSpeaking", () => {
+        this.sendBrowserEvent(ws, { type: "userStartedSpeaking" });
+      });
+
+      client.on("agentStartedSpeaking", () => {
+        this.sendBrowserEvent(ws, { type: "agentStartedSpeaking" });
+      });
+
+      client.on("agentAudioDone", () => {
+        this.sendBrowserEvent(ws, { type: "agentAudioDone" });
+      });
+
+      client.on("agentThinking", () => {
+        this.sendBrowserEvent(ws, { type: "agentThinking" });
+      });
+
+      client.on("error", (error) => {
+        this.sendBrowserEvent(ws, { type: "error", message: error.message });
+      });
+
+      // Bridge: browser audio → Deepgram
+      ws.on("message", (data: Buffer | string, isBinary: boolean) => {
+        if (isBinary) {
+          // Binary data is audio from browser microphone
+          const audioBuffer = Buffer.isBuffer(data) ? data : Buffer.from(data as string, "binary");
+          client.sendAudio(audioBuffer);
+          return;
+        }
+
+        // Text frames are control messages
+        try {
+          const msg = JSON.parse(data.toString()) as { type: string };
+          if (msg.type === "close") {
+            client.close();
+            ws.close(1000, "Client requested close");
+          }
+        } catch {
+          // Ignore invalid JSON
+        }
+      });
+
+      // Clean up on disconnect
+      ws.on("close", () => {
+        console.log(`[voice-call] Browser voice session ended: ${callId}`);
+        dgProvider.closeSession(callId);
+      });
+
+      ws.on("error", (error) => {
+        console.error(`[voice-call] Browser voice WebSocket error:`, error);
+        dgProvider.closeSession(callId);
+      });
+    } catch (error) {
+      console.error(`[voice-call] Failed to create browser voice session:`, error);
+      this.sendBrowserEvent(ws, {
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to create session",
+      });
+      ws.close(1011, "Session creation failed");
+    }
+  }
+
+  private sendBrowserEvent(ws: WebSocket, event: Record<string, unknown>): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(event));
+    }
   }
 
   /**
@@ -500,71 +678,116 @@ export class VoiceCallWebhookServer {
         res.flushHeaders();
 
         const reader = proxyRes.body.getReader();
-        let firstChunkSeen = false;
-        let fillerSent = false;
-        let skipNextRoleChunk = false;
+        const proxyStartTime = Date.now();
 
         const threshold = this.fillerThresholdMs;
         const phrases = this.fillerPhrases;
+        const FOLLOWUP_INTERVAL_MS = 5000;
+        const STATIC_FOLLOWUPS = [
+          "Still working on that.",
+          "Almost there, one sec.",
+          "Hang on, still pulling that up.",
+          "Just a moment longer.",
+        ];
 
-        // Set up filler timer — fires if no data arrives before threshold
-        const fillerTimer =
-          threshold > 0 && phrases.length > 0
-            ? setTimeout(() => {
-                if (!firstChunkSeen) {
-                  const phrase = phrases[Math.floor(Math.random() * phrases.length)];
-                  const id = `filler_${Date.now()}`;
-                  const created = Math.floor(Date.now() / 1000);
-                  res.write(
-                    `data: ${JSON.stringify({
-                      id,
-                      object: "chat.completion.chunk",
-                      created,
-                      model: "filler",
-                      choices: [{ index: 0, delta: { role: "assistant" } }],
-                    })}\n\n`,
-                  );
-                  res.write(
-                    `data: ${JSON.stringify({
-                      id,
-                      object: "chat.completion.chunk",
-                      created,
-                      model: "filler",
-                      choices: [{ index: 0, delta: { content: phrase }, finish_reason: null }],
-                    })}\n\n`,
-                  );
-                  fillerSent = true;
-                  skipNextRoleChunk = true;
-                  console.log(`[voice-call] Injected filler phrase: "${phrase}"`);
+        // Extract callSid from session key (agent:agentId:voice:callSid)
+        const callSid = sessionKey?.split(":")[3];
+
+        // Filler injection via Deepgram InjectAgentMessage (speaks immediately,
+        // independent of SSE stream).
+        let fillerCount = 0;
+        let contentReceived = false;
+        const timers: ReturnType<typeof setTimeout>[] = [];
+        // Dynamic filler set (primary + follow-ups) generated by Haiku in one call
+        let dynamicFillers: string[] | null = null;
+
+        const injectFiller = (phrase: string, source: string): boolean => {
+          if (contentReceived) return false;
+          if (callSid && this.deepgramBridge?.injectFiller(callSid, phrase)) {
+            fillerCount++;
+            console.log(
+              `[voice-call] Filler #${fillerCount} (${source}): "${phrase}" (+${Date.now() - proxyStartTime}ms)`,
+            );
+            return true;
+          }
+          return false;
+        };
+
+        const scheduleFollowups = () => {
+          const jitter = Math.floor(Math.random() * 2000) - 1000; // ±1s
+          const timer = setTimeout(() => {
+            if (contentReceived) return;
+            // Use dynamic follow-ups if available, otherwise static
+            const phrase = dynamicFillers?.[fillerCount] ?? STATIC_FOLLOWUPS[fillerCount - 1];
+            if (phrase) {
+              injectFiller(phrase, dynamicFillers?.[fillerCount] ? "dynamic" : "static");
+              if (fillerCount < 4) scheduleFollowups();
+            }
+          }, FOLLOWUP_INTERVAL_MS + jitter);
+          timers.push(timer);
+        };
+
+        // Generate full filler set via Haiku (primary + follow-ups in one call)
+        const anthropicKey = process.env.ANTHROPIC_API_KEY;
+        if (this.dynamicFiller && anthropicKey && threshold > 0 && callSid) {
+          let userMessage = "";
+          try {
+            const parsed = JSON.parse(body) as {
+              messages?: Array<{ role: string; content: string }>;
+            };
+            const last = parsed.messages?.filter((m) => m.role === "user").pop();
+            if (last?.content) userMessage = last.content;
+          } catch {
+            /* ignore parse errors */
+          }
+          if (userMessage) {
+            void generateFillerSet({ userMessage }, anthropicKey).then((fillers) => {
+              if (fillers && fillers.length > 0) {
+                dynamicFillers = fillers;
+                console.log(
+                  `[voice-call] Dynamic fillers ready (${fillers.length}): ${fillers.map((f) => `"${f}"`).join(", ")} (+${Date.now() - proxyStartTime}ms)`,
+                );
+                if (fillerCount === 0) {
+                  injectFiller(fillers[0], "dynamic");
+                  scheduleFollowups();
                 }
-              }, threshold)
-            : null;
+              }
+            });
+          }
+        }
+
+        // Fallback: static filler fires at threshold if dynamic hasn't arrived yet
+        if (threshold > 0 && phrases.length > 0 && callSid) {
+          timers.push(
+            setTimeout(() => {
+              if (fillerCount === 0) {
+                const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+                if (phrase) {
+                  injectFiller(phrase, "static");
+                  scheduleFollowups();
+                }
+              }
+            }, threshold),
+          );
+        }
 
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
-            if (!firstChunkSeen) {
-              firstChunkSeen = true;
-              if (fillerTimer) clearTimeout(fillerTimer);
-            }
-
-            // If filler was sent, skip the gateway's initial role chunk to avoid duplication
-            if (skipNextRoleChunk && fillerSent) {
-              const text = new TextDecoder().decode(value);
-              // Check if this chunk contains only the role delta (no content)
-              if (text.includes('"role"') && !text.includes('"content"')) {
-                skipNextRoleChunk = false;
-                continue;
+            if (!contentReceived) {
+              const chunkText = new TextDecoder().decode(value, { stream: true });
+              if (chunkText.includes('"content"')) {
+                contentReceived = true;
+                console.log(
+                  `[voice-call] Content received (+${Date.now() - proxyStartTime}ms, fillers=${fillerCount})`,
+                );
               }
-              skipNextRoleChunk = false;
             }
-
             res.write(value);
           }
         } finally {
-          if (fillerTimer) clearTimeout(fillerTimer);
+          for (const t of timers) clearTimeout(t);
           res.end();
         }
       } else {

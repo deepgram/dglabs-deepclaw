@@ -12,10 +12,11 @@
   height: 100vh;
   display: grid;
   grid-template-columns: var(--shell-nav-width) minmax(0, 1fr);
-  grid-template-rows: var(--shell-topbar-height) 1fr;
+  grid-template-rows: var(--shell-topbar-height) 1fr auto;
   grid-template-areas:
     "topbar topbar"
-    "nav content";
+    "nav content"
+    "footer footer";
   gap: 0;
   animation: dashboard-enter 0.4s var(--ease-out);
   transition: grid-template-columns var(--shell-focus-duration) var(--shell-focus-ease);
@@ -514,6 +515,32 @@
 }
 
 /* ===========================================
+   Shell Footer
+   =========================================== */
+
+.shell-footer {
+  grid-area: footer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+  opacity: 0.4;
+  transition: opacity 0.2s ease;
+}
+
+.shell-footer:hover {
+  opacity: 0.7;
+}
+
+.shell-footer__text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+/* ===========================================
    Grid Utilities
    =========================================== */
 
@@ -570,11 +597,12 @@
     --shell-pad: 12px;
     --shell-gap: 12px;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto 1fr;
+    grid-template-rows: auto auto 1fr auto;
     grid-template-areas:
       "topbar"
       "nav"
-      "content";
+      "content"
+      "footer";
   }
 
   .nav {
@@ -617,5 +645,11 @@
 
   .list-item {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .shell-footer {
+    display: none;
   }
 }

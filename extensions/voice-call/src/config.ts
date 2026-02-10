@@ -70,9 +70,10 @@ export const DeepgramLatencyConfigSchema = z
   .object({
     fillerThresholdMs: z.number().int().nonnegative().default(1500),
     fillerPhrases: z.array(z.string()).default([]),
+    dynamicFiller: z.boolean().default(true),
   })
   .strict()
-  .default({ fillerThresholdMs: 1500, fillerPhrases: [] });
+  .default({ fillerThresholdMs: 1500, fillerPhrases: [], dynamicFiller: true });
 export type DeepgramLatencyConfig = z.infer<typeof DeepgramLatencyConfigSchema>;
 
 export const DeepgramFallbackConfigSchema = z
@@ -197,6 +198,21 @@ export const TtsConfigSchema = z
 export type VoiceCallTtsConfig = z.infer<typeof TtsConfigSchema>;
 
 // -----------------------------------------------------------------------------
+// Call Summary Configuration
+// -----------------------------------------------------------------------------
+
+export const CallSummaryConfigSchema = z
+  .object({
+    /** Enable post-call summary generation (appends to CALLS.md in agent workspace) */
+    enabled: z.boolean().default(true),
+    /** Maximum number of entries to keep in CALLS.md (oldest trimmed first) */
+    maxEntries: z.number().int().positive().default(50),
+  })
+  .strict()
+  .default({ enabled: true, maxEntries: 50 });
+export type CallSummaryConfig = z.infer<typeof CallSummaryConfigSchema>;
+
+// -----------------------------------------------------------------------------
 // Webhook Server Configuration
 // -----------------------------------------------------------------------------
 
@@ -311,12 +327,12 @@ export type CallMode = z.infer<typeof CallModeSchema>;
 export const OutboundConfigSchema = z
   .object({
     /** Default call mode for outbound calls */
-    defaultMode: CallModeSchema.default("notify"),
+    defaultMode: CallModeSchema.default("conversation"),
     /** Seconds to wait after TTS before auto-hangup in notify mode */
     notifyHangupDelaySec: z.number().int().nonnegative().default(3),
   })
   .strict()
-  .default({ defaultMode: "notify", notifyHangupDelaySec: 3 });
+  .default({ defaultMode: "conversation", notifyHangupDelaySec: 3 });
 export type OutboundConfig = z.infer<typeof OutboundConfigSchema>;
 
 // -----------------------------------------------------------------------------
@@ -455,6 +471,9 @@ export const VoiceCallConfigSchema = z
 
     /** Timeout for response generation in ms (default 30s) */
     responseTimeoutMs: z.number().int().positive().default(30000),
+
+    /** Post-call summary configuration */
+    callSummary: CallSummaryConfigSchema,
   })
   .strict();
 

@@ -163,6 +163,10 @@ export async function runEmbeddedAttempt(
     : resolvedWorkspace;
   await fs.mkdir(effectiveWorkspace, { recursive: true });
 
+  log.debug(
+    `[agent-context] workspace=${effectiveWorkspace} sandbox=${sandbox?.enabled ? `yes(${sandbox.workspaceAccess})` : "no"}`,
+  );
+
   let restoreSkillEnv: (() => void) | undefined;
   process.chdir(effectiveWorkspace);
   try {
@@ -200,6 +204,14 @@ export async function runEmbeddedAttempt(
         sessionId: params.sessionId,
         warn: makeBootstrapWarn({ sessionLabel, warn: (message) => log.warn(message) }),
       });
+
+    // Log bootstrap file summary
+    const loaded = hookAdjustedBootstrapFiles.filter((f) => !f.missing).map((f) => f.name);
+    const missing = hookAdjustedBootstrapFiles.filter((f) => f.missing).map((f) => f.name);
+    log.debug(
+      `[agent-context] bootstrap loaded=[${loaded.join(",")}]${missing.length ? ` missing=[${missing.join(",")}]` : ""}`,
+    );
+
     const workspaceNotes = hookAdjustedBootstrapFiles.some(
       (file) => file.name === DEFAULT_BOOTSTRAP_FILENAME && !file.missing,
     )

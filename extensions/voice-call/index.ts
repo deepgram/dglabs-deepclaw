@@ -9,6 +9,12 @@ import {
 } from "./src/config.js";
 import { createVoiceCallRuntime, type VoiceCallRuntime } from "./src/runtime.js";
 
+// Module-level runtime cache: survives across plugin registry reloads so we
+// don't try to bind the webhook port twice when the loader creates a fresh
+// registry with a different cache key (e.g. different workspace dir).
+let _sharedRuntime: VoiceCallRuntime | null = null;
+let _sharedRuntimePromise: Promise<VoiceCallRuntime> | null = null;
+
 const voiceCallConfigSchema = {
   parse(value: unknown): VoiceCallConfig {
     const raw =
@@ -159,8 +165,7 @@ const voiceCallPlugin = {
       }
     }
 
-    let runtimePromise: Promise<VoiceCallRuntime> | null = null;
-    let runtime: VoiceCallRuntime | null = null;
+    let runtime: VoiceCallRuntime | null = _sharedRuntime;
 
     const ensureRuntime = async () => {
       if (!config.enabled) {
@@ -172,15 +177,21 @@ const voiceCallPlugin = {
       if (runtime) {
         return runtime;
       }
-      if (!runtimePromise) {
-        runtimePromise = createVoiceCallRuntime({
+      // Check module-level cache (survives plugin registry reloads)
+      if (_sharedRuntime) {
+        runtime = _sharedRuntime;
+        return runtime;
+      }
+      if (!_sharedRuntimePromise) {
+        _sharedRuntimePromise = createVoiceCallRuntime({
           config,
           coreConfig: api.config as CoreConfig,
           ttsRuntime: api.runtime.tts,
           logger: api.logger,
         });
       }
-      runtime = await runtimePromise;
+      runtime = await _sharedRuntimePromise;
+      _sharedRuntime = runtime;
       return runtime;
     };
 
@@ -279,6 +290,39 @@ const voiceCallPlugin = {
       }
     });
 
+    api.registerGatewayMethod("voicecall.channelStatus", async ({ respond }) => {
+      try {
+        const inboundEnabled = config.inboundPolicy !== "disabled";
+        const direction = inboundEnabled ? "both" : "outbound";
+        const running = !!_sharedRuntime;
+        const activeCalls = _sharedRuntime?.manager?.getActiveCalls?.()?.length ?? 0;
+
+        const numbers = Object.entries(config.numbers ?? {}).map(([number, entry]) => ({
+          number,
+          agentId: entry.agentId,
+          direction: entry.direction,
+        }));
+
+        respond(true, {
+          configured: config.enabled && !!config.provider,
+          running,
+          provider: config.provider ?? null,
+          fromNumber: config.fromNumber ?? null,
+          inboundPolicy: config.inboundPolicy,
+          inboundEnabled,
+          outboundEnabled: true,
+          direction,
+          activeCalls,
+          lastError: null,
+          numbers,
+          defaultAgentId: config.defaultAgentId,
+          outboundMode: config.outbound?.defaultMode ?? "conversation",
+        });
+      } catch (err) {
+        sendError(respond, err);
+      }
+    });
+
     api.registerGatewayMethod("voicecall.status", async ({ params, respond }) => {
       try {
         const raw =
@@ -312,8 +356,11 @@ const voiceCallPlugin = {
           return;
         }
         const rt = await ensureRuntime();
+        const mode =
+          params?.mode === "notify" || params?.mode === "conversation" ? params.mode : undefined;
         const result = await rt.manager.initiateCall(to, undefined, {
           message: message || undefined,
+          mode,
         });
         if (!result.success) {
           respond(false, { error: result.error || "initiate failed" });
@@ -475,14 +522,15 @@ const voiceCallPlugin = {
         }
       },
       stop: async () => {
-        if (!runtimePromise) {
+        if (!_sharedRuntimePromise) {
           return;
         }
         try {
-          const rt = await runtimePromise;
+          const rt = await _sharedRuntimePromise;
           await rt.stop();
         } finally {
-          runtimePromise = null;
+          _sharedRuntimePromise = null;
+          _sharedRuntime = null;
           runtime = null;
         }
       },

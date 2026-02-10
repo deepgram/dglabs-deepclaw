@@ -264,7 +264,8 @@
             "additionalProperties": false,
             "properties": {
               "fillerThresholdMs": { "type": "integer", "minimum": 0 },
-              "fillerPhrases": { "type": "array", "items": { "type": "string" } }
+              "fillerPhrases": { "type": "array", "items": { "type": "string" } },
+              "dynamicFiller": { "type": "boolean", "default": true }
             }
           },
           "fallback": {
