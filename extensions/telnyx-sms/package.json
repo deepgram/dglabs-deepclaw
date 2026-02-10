@@ -1,0 +1,35 @@
+{
+  "name": "@openclaw/telnyx-sms",
+  "version": "2026.2.6-1",
+  "description": "OpenClaw Telnyx SMS channel plugin",
+  "type": "module",
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.26"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "telnyx-sms",
+      "label": "Telnyx SMS",
+      "selectionLabel": "Telnyx SMS",
+      "detailLabel": "Telnyx SMS",
+      "docsPath": "/channels/telnyx-sms",
+      "docsLabel": "telnyx-sms",
+      "blurb": "SMS messaging via Telnyx Messaging API.",
+      "aliases": [
+        "sms"
+      ],
+      "order": 76
+    },
+    "install": {
+      "npmSpec": "@openclaw/telnyx-sms",
+      "localPath": "extensions/telnyx-sms",
+      "defaultChoice": "npm"
+    }
+  }
+}

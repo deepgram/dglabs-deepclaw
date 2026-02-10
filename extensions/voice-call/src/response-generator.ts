@@ -5,6 +5,7 @@
 
 import crypto from "node:crypto";
 import type { VoiceCallConfig } from "./config.js";
+import { resolveAgentForNumber } from "./config.js";
 import { loadCoreAgentDeps, type CoreConfig } from "./core-bridge.js";
 
 export type VoiceResponseParams = {
@@ -16,6 +17,8 @@ export type VoiceResponseParams = {
   callId: string;
   /** Caller's phone number */
   from: string;
+  /** Called phone number (for agent routing) */
+  calledNumber?: string;
   /** Conversation transcript */
   transcript: Array<{ speaker: "user" | "bot"; text: string }>;
   /** Latest user message */
@@ -39,7 +42,7 @@ type SessionEntry = {
 export async function generateVoiceResponse(
   params: VoiceResponseParams,
 ): Promise<VoiceResponseResult> {
-  const { voiceConfig, callId, from, transcript, userMessage, coreConfig } = params;
+  const { voiceConfig, callId, from, calledNumber, transcript, userMessage, coreConfig } = params;
 
   if (!coreConfig) {
     return { text: null, error: "Core config unavailable for voice response" };
@@ -56,10 +59,12 @@ export async function generateVoiceResponse(
   }
   const cfg = coreConfig;
 
-  // Build voice-specific session key based on phone number
-  const normalizedPhone = from.replace(/\D/g, "");
-  const sessionKey = `voice:${normalizedPhone}`;
-  const agentId = "main";
+  // Resolve agent ID from number routing config
+  const agentId = resolveAgentForNumber(voiceConfig, calledNumber, "inbound");
+
+  // Per-call session key — each call gets a fresh session.
+  // Agent identity persists via workspace files (SOUL.md, IDENTITY.md), not session history.
+  const sessionKey = `agent:${agentId}:voice:${callId}`;
 
   // Resolve paths
   const storePath = deps.resolveStorePath(cfg.session?.store, { agentId });
@@ -97,14 +102,23 @@ export async function generateVoiceResponse(
   // Resolve thinking level
   const thinkLevel = deps.resolveThinkingDefault({ cfg, provider, model });
 
-  // Resolve agent identity for personalized prompt
-  const identity = deps.resolveAgentIdentity(cfg, agentId);
-  const agentName = identity?.name?.trim() || "assistant";
-
-  // Build system prompt with conversation history
+  // Build system prompt with voice-specific behavioral instructions only.
+  // Agent identity comes from workspace files (SOUL.md, IDENTITY.md, BOOTSTRAP.md)
+  // loaded by the Pi agent's normal startup path.
+  const tz = voiceConfig.timezone ?? "UTC";
+  const localTime = new Date().toLocaleString("en-US", {
+    timeZone: tz,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
   const basePrompt =
     voiceConfig.responseSystemPrompt ??
-    `You are ${agentName}, a helpful voice assistant on a phone call. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly. The caller's phone number is ${from}. You have access to tools - use them when helpful.`;
+    `You are on a phone call. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly. IMPORTANT: Your responses will be spoken aloud via text-to-speech. Do NOT use any text formatting — no markdown, no bullet points, no asterisks, no numbered lists, no headers. Write plain conversational sentences only. When you need to use a tool or look something up, ALWAYS say a brief acknowledgment first so the caller isn't waiting in silence. Today is ${localTime}. Always present times in this timezone. The caller's phone number is ${from}. You have access to tools - use them when helpful.`;
 
   let extraSystemPrompt = basePrompt;
   if (transcript.length > 0) {

@@ -166,7 +166,11 @@ export async function runEmbeddedAttempt(
   let restoreSkillEnv: (() => void) | undefined;
   process.chdir(effectiveWorkspace);
   try {
-    const shouldLoadSkillEntries = !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
+    // When sandboxed with isolated workspace, reload skills from the sandbox dir
+    // so paths point inside the sandbox (not the gateway container's filesystem).
+    const isSandboxedIsolated = !!sandbox?.enabled && sandbox.workspaceAccess !== "rw";
+    const shouldLoadSkillEntries =
+      isSandboxedIsolated || !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
     const skillEntries = shouldLoadSkillEntries
       ? loadWorkspaceSkillEntries(effectiveWorkspace)
       : [];
@@ -181,7 +185,7 @@ export async function runEmbeddedAttempt(
         });
 
     const skillsPrompt = resolveSkillsPromptForRun({
-      skillsSnapshot: params.skillsSnapshot,
+      skillsSnapshot: isSandboxedIsolated ? undefined : params.skillsSnapshot,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
       workspaceDir: effectiveWorkspace,

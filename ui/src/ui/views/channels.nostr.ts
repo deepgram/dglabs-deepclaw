@@ -26,7 +26,6 @@ export function renderNostrCard(params: {
   props: ChannelsProps;
   nostr?: NostrStatus | null;
   nostrAccounts: ChannelAccountSnapshot[];
-  accountCountLabel: unknown;
   /** Profile form state (optional - if provided, shows form) */
   profileFormState?: NostrProfileFormState | null;
   /** Profile form callbacks */
@@ -34,15 +33,8 @@ export function renderNostrCard(params: {
   /** Called when Edit Profile is clicked */
   onEditProfile?: () => void;
 }) {
-  const {
-    props,
-    nostr,
-    nostrAccounts,
-    accountCountLabel,
-    profileFormState,
-    profileFormCallbacks,
-    onEditProfile,
-  } = params;
+  const { props, nostr, nostrAccounts, profileFormState, profileFormCallbacks, onEditProfile } =
+    params;
   const primaryAccount = nostrAccounts[0];
   const summaryConfigured = nostr?.configured ?? primaryAccount?.configured ?? false;
   const summaryRunning = nostr?.running ?? primaryAccount?.running ?? false;
@@ -183,55 +175,49 @@ export function renderNostrCard(params: {
   };
 
   return html`
-    <div class="card">
-      <div class="card-title">Nostr</div>
-      <div class="card-sub">Decentralized DMs via Nostr relays (NIP-04).</div>
-      ${accountCountLabel}
-
-      ${
-        hasMultipleAccounts
-          ? html`
-            <div class="account-card-list">
-              ${nostrAccounts.map((account) => renderAccountCard(account))}
+    ${
+      hasMultipleAccounts
+        ? html`
+          <div class="account-card-list">
+            ${nostrAccounts.map((account) => renderAccountCard(account))}
+          </div>
+        `
+        : html`
+          <div class="status-list">
+            <div>
+              <span class="label">Configured</span>
+              <span>${summaryConfigured ? "Yes" : "No"}</span>
             </div>
-          `
-          : html`
-            <div class="status-list" style="margin-top: 16px;">
-              <div>
-                <span class="label">Configured</span>
-                <span>${summaryConfigured ? "Yes" : "No"}</span>
-              </div>
-              <div>
-                <span class="label">Running</span>
-                <span>${summaryRunning ? "Yes" : "No"}</span>
-              </div>
-              <div>
-                <span class="label">Public Key</span>
-                <span class="monospace" title="${summaryPublicKey ?? ""}"
-                  >${truncatePubkey(summaryPublicKey)}</span
-                >
-              </div>
-              <div>
-                <span class="label">Last start</span>
-                <span>${summaryLastStartAt ? formatRelativeTimestamp(summaryLastStartAt) : "n/a"}</span>
-              </div>
+            <div>
+              <span class="label">Running</span>
+              <span>${summaryRunning ? "Yes" : "No"}</span>
             </div>
-          `
-      }
+            <div>
+              <span class="label">Public Key</span>
+              <span class="monospace" title="${summaryPublicKey ?? ""}"
+                >${truncatePubkey(summaryPublicKey)}</span
+              >
+            </div>
+            <div>
+              <span class="label">Last start</span>
+              <span>${summaryLastStartAt ? formatRelativeTimestamp(summaryLastStartAt) : "n/a"}</span>
+            </div>
+          </div>
+        `
+    }
 
-      ${
-        summaryLastError
-          ? html`<div class="callout danger" style="margin-top: 12px;">${summaryLastError}</div>`
-          : nothing
-      }
+    ${
+      summaryLastError
+        ? html`<div class="callout danger" style="margin-top: 12px;">${summaryLastError}</div>`
+        : nothing
+    }
 
-      ${renderProfileSection()}
+    ${renderProfileSection()}
 
-      ${renderChannelConfigSection({ channelId: "nostr", props })}
+    ${renderChannelConfigSection({ channelId: "nostr", props })}
 
-      <div class="row" style="margin-top: 12px;">
-        <button class="btn" @click=${() => props.onRefresh(false)}>Refresh</button>
-      </div>
+    <div class="row" style="margin-top: 12px;">
+      <button class="btn" @click=${() => props.onRefresh(false)}>Refresh</button>
     </div>
   `;
 }

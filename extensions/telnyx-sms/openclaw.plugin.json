@@ -1,0 +1,9 @@
+{
+  "id": "telnyx-sms",
+  "channels": ["telnyx-sms"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

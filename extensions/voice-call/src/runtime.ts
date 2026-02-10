@@ -3,7 +3,9 @@ import type { CoreConfig } from "./core-bridge.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type { TelephonyTtsRuntime } from "./telephony-tts.js";
 import { resolveVoiceCallConfig, validateProviderConfig } from "./config.js";
+import { DeepgramMediaBridge } from "./deepgram-media-bridge.js";
 import { CallManager } from "./manager.js";
+import { DeepgramProvider } from "./providers/deepgram.js";
 import { MockProvider } from "./providers/mock.js";
 import { PlivoProvider } from "./providers/plivo.js";
 import { TelnyxProvider } from "./providers/telnyx.js";
@@ -83,6 +85,20 @@ function resolveProvider(config: VoiceCallConfig): VoiceCallProvider {
           publicUrl: config.publicUrl,
           skipVerification: config.skipSignatureVerification,
           ringTimeoutSec: Math.max(1, Math.floor(config.ringTimeoutMs / 1000)),
+          webhookSecurity: config.webhookSecurity,
+        },
+      );
+    case "deepgram":
+      return new TwilioProvider(
+        {
+          accountSid: config.twilio?.accountSid,
+          authToken: config.twilio?.authToken,
+        },
+        {
+          allowNgrokFreeTierLoopbackBypass,
+          publicUrl: config.publicUrl,
+          skipVerification: config.skipSignatureVerification,
+          streamPath: config.streaming?.streamPath || "/voice/stream",
           webhookSecurity: config.webhookSecurity,
         },
       );
@@ -182,6 +198,47 @@ export async function createVoiceCallRuntime(params: {
       twilioProvider.setMediaStreamHandler(mediaHandler);
       log.info("[voice-call] Media stream handler wired to provider");
     }
+  }
+
+  // Deepgram hybrid mode: Twilio handles telephony, Deepgram handles voice AI
+  if (config.provider === "deepgram" && config.deepgram) {
+    const deepgramProvider = new DeepgramProvider(config.deepgram);
+    const twilioProvider = provider as TwilioProvider;
+
+    // Ensure public URL is set for stream URL generation
+    if (publicUrl && !twilioProvider.getPublicUrl()) {
+      twilioProvider.setPublicUrl(publicUrl);
+    }
+
+    const gatewayPort = process.env.OPENCLAW_GATEWAY_PORT || "18789";
+    const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN || "";
+    const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
+
+    const bridge = new DeepgramMediaBridge({
+      deepgramProvider,
+      manager,
+      gatewayUrl,
+      gatewayToken,
+      publicUrl: publicUrl ?? undefined,
+      coreConfig,
+      voiceCallConfig: config,
+      shouldAcceptStream: ({ callId, token }) => {
+        const call = manager.getCallByProviderCallId(callId);
+        if (!call) return false;
+        if (!twilioProvider.isValidStreamToken(callId, token)) {
+          console.warn(`[voice-call] Rejecting media stream: invalid token for ${callId}`);
+          return false;
+        }
+        return true;
+      },
+    });
+
+    webhookServer.setDeepgramMediaBridge(bridge);
+    if (gatewayToken) {
+      webhookServer.setGatewayConfig(gatewayUrl, gatewayToken);
+    }
+
+    log.info("[voice-call] Deepgram hybrid mode enabled (Twilio + Deepgram + Gateway)");
   }
 
   manager.initialize(provider, webhookUrl);

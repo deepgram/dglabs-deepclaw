@@ -3,6 +3,7 @@ import http from "node:http";
 import { URL } from "node:url";
 import type { VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
+import type { DeepgramMediaBridge } from "./deepgram-media-bridge.js";
 import type { CallManager } from "./manager.js";
 import type { MediaStreamConfig } from "./media-stream.js";
 import type { VoiceCallProvider } from "./providers/base.js";
@@ -26,6 +27,16 @@ export class VoiceCallWebhookServer {
 
   /** Media stream handler for bidirectional audio (when streaming enabled) */
   private mediaStreamHandler: MediaStreamHandler | null = null;
+  /** Deepgram media bridge for hybrid mode */
+  private deepgramBridge: DeepgramMediaBridge | null = null;
+  /** Gateway URL for LLM proxy */
+  private gatewayUrl: string | null = null;
+  /** Gateway auth token */
+  private gatewayToken: string | null = null;
+  /** Filler threshold (ms) — inject filler phrase if first SSE chunk takes longer */
+  private fillerThresholdMs: number = 0;
+  /** Filler phrases to randomly pick from when threshold fires */
+  private fillerPhrases: string[] = [];
 
   constructor(
     config: VoiceCallConfig,
@@ -38,6 +49,12 @@ export class VoiceCallWebhookServer {
     this.provider = provider;
     this.coreConfig = coreConfig ?? null;
 
+    // Store filler config from deepgram latency settings
+    if (config.deepgram?.latency) {
+      this.fillerThresholdMs = config.deepgram.latency.fillerThresholdMs ?? 0;
+      this.fillerPhrases = config.deepgram.latency.fillerPhrases ?? [];
+    }
+
     // Initialize media stream handler if streaming is enabled
     if (config.streaming?.enabled) {
       this.initializeMediaStreaming();
@@ -49,6 +66,21 @@ export class VoiceCallWebhookServer {
    */
   getMediaStreamHandler(): MediaStreamHandler | null {
     return this.mediaStreamHandler;
+  }
+
+  /**
+   * Set the Deepgram media bridge for hybrid mode WS routing.
+   */
+  setDeepgramMediaBridge(bridge: DeepgramMediaBridge): void {
+    this.deepgramBridge = bridge;
+  }
+
+  /**
+   * Configure gateway proxy settings.
+   */
+  setGatewayConfig(url: string, token: string): void {
+    this.gatewayUrl = url;
+    this.gatewayToken = token;
   }
 
   /**
@@ -173,18 +205,23 @@ export class VoiceCallWebhookServer {
       });
 
       // Handle WebSocket upgrades for media streams
-      if (this.mediaStreamHandler) {
-        this.server.on("upgrade", (request, socket, head) => {
-          const url = new URL(request.url || "/", `http://${request.headers.host}`);
+      this.server.on("upgrade", (request, socket, head) => {
+        const url = new URL(request.url || "/", `http://${request.headers.host}`);
 
-          if (url.pathname === streamPath) {
+        if (url.pathname === streamPath) {
+          if (this.deepgramBridge) {
+            console.log("[voice-call] WebSocket upgrade for Deepgram media bridge");
+            this.deepgramBridge.handleUpgrade(request, socket, head);
+          } else if (this.mediaStreamHandler) {
             console.log("[voice-call] WebSocket upgrade for media stream");
-            this.mediaStreamHandler?.handleUpgrade(request, socket, head);
+            this.mediaStreamHandler.handleUpgrade(request, socket, head);
           } else {
             socket.destroy();
           }
-        });
-      }
+        } else {
+          socket.destroy();
+        }
+      });
 
       this.server.on("error", reject);
 
@@ -224,6 +261,12 @@ export class VoiceCallWebhookServer {
     webhookPath: string,
   ): Promise<void> {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+    // Gateway LLM proxy for Deepgram think.endpoint
+    if (url.pathname === "/v1/chat/completions" && req.method === "POST") {
+      await this.handleGatewayProxy(req, res);
+      return;
+    }
 
     // Check path
     if (!url.pathname.startsWith(webhookPath)) {
@@ -368,6 +411,7 @@ export class VoiceCallWebhookServer {
         coreConfig: this.coreConfig,
         callId,
         from: call.from,
+        calledNumber: call.to,
         transcript: call.transcript,
         userMessage,
       });
@@ -383,6 +427,169 @@ export class VoiceCallWebhookServer {
       }
     } catch (err) {
       console.error(`[voice-call] Auto-response error:`, err);
+    }
+  }
+
+  /**
+   * Proxy /v1/chat/completions requests to the gateway.
+   * Used by Deepgram's think.endpoint to route LLM calls through the gateway.
+   *
+   * Supports SSE streaming: when the gateway returns `text/event-stream`,
+   * chunks are piped through in real-time so Deepgram can begin TTS immediately.
+   * If the first chunk takes longer than `fillerThresholdMs`, a filler phrase
+   * is injected so the caller hears an acknowledgment instead of silence.
+   */
+  private async handleGatewayProxy(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    if (!this.gatewayUrl || !this.gatewayToken) {
+      res.statusCode = 503;
+      res.end("Gateway not configured");
+      return;
+    }
+
+    let body: string;
+    try {
+      body = await this.readBody(req, MAX_WEBHOOK_BODY_BYTES);
+    } catch (err) {
+      if (err instanceof Error && err.message === "PayloadTooLarge") {
+        res.statusCode = 413;
+        res.end("Payload Too Large");
+        return;
+      }
+      throw err;
+    }
+
+    // Force streaming so the gateway uses its SSE path
+    try {
+      const parsedBody: Record<string, unknown> = JSON.parse(body);
+      parsedBody.stream = true;
+      body = JSON.stringify(parsedBody);
+    } catch {
+      /* keep original body if parse fails */
+    }
+
+    // Forward session key and agent ID from incoming headers
+    const sessionKey = req.headers["x-openclaw-session-key"] as string | undefined;
+    const agentId = req.headers["x-openclaw-agent-id"] as string | undefined;
+
+    const proxyHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.gatewayToken}`,
+    };
+    if (sessionKey) proxyHeaders["x-openclaw-session-key"] = sessionKey;
+    if (agentId) proxyHeaders["x-openclaw-agent-id"] = agentId;
+
+    try {
+      console.log(`[voice-call] Proxying /v1/chat/completions (streaming) to ${this.gatewayUrl}`);
+      const proxyRes = await fetch(`${this.gatewayUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: proxyHeaders,
+        body,
+      });
+
+      res.statusCode = proxyRes.status;
+      const contentType = proxyRes.headers.get("content-type");
+      if (contentType) res.setHeader("Content-Type", contentType);
+
+      // SSE streaming — pipe chunks through in real-time
+      if (contentType?.includes("text/event-stream") && proxyRes.body) {
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.flushHeaders();
+
+        const reader = proxyRes.body.getReader();
+        let firstChunkSeen = false;
+        let fillerSent = false;
+        let skipNextRoleChunk = false;
+
+        const threshold = this.fillerThresholdMs;
+        const phrases = this.fillerPhrases;
+
+        // Set up filler timer — fires if no data arrives before threshold
+        const fillerTimer =
+          threshold > 0 && phrases.length > 0
+            ? setTimeout(() => {
+                if (!firstChunkSeen) {
+                  const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+                  const id = `filler_${Date.now()}`;
+                  const created = Math.floor(Date.now() / 1000);
+                  res.write(
+                    `data: ${JSON.stringify({
+                      id,
+                      object: "chat.completion.chunk",
+                      created,
+                      model: "filler",
+                      choices: [{ index: 0, delta: { role: "assistant" } }],
+                    })}\n\n`,
+                  );
+                  res.write(
+                    `data: ${JSON.stringify({
+                      id,
+                      object: "chat.completion.chunk",
+                      created,
+                      model: "filler",
+                      choices: [{ index: 0, delta: { content: phrase }, finish_reason: null }],
+                    })}\n\n`,
+                  );
+                  fillerSent = true;
+                  skipNextRoleChunk = true;
+                  console.log(`[voice-call] Injected filler phrase: "${phrase}"`);
+                }
+              }, threshold)
+            : null;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            if (!firstChunkSeen) {
+              firstChunkSeen = true;
+              if (fillerTimer) clearTimeout(fillerTimer);
+            }
+
+            // If filler was sent, skip the gateway's initial role chunk to avoid duplication
+            if (skipNextRoleChunk && fillerSent) {
+              const text = new TextDecoder().decode(value);
+              // Check if this chunk contains only the role delta (no content)
+              if (text.includes('"role"') && !text.includes('"content"')) {
+                skipNextRoleChunk = false;
+                continue;
+              }
+              skipNextRoleChunk = false;
+            }
+
+            res.write(value);
+          }
+        } finally {
+          if (fillerTimer) clearTimeout(fillerTimer);
+          res.end();
+        }
+      } else {
+        // Non-streaming — buffer and forward
+        const responseBody = await proxyRes.text();
+        res.end(responseBody);
+      }
+    } catch (err) {
+      console.error("[voice-call] Gateway proxy error:", err);
+      if (!res.headersSent) {
+        res.statusCode = 502;
+        res.end("Bad Gateway");
+      } else {
+        // Mid-stream error — write an SSE error event and close
+        try {
+          res.write(
+            `data: ${JSON.stringify({
+              error: { message: "Gateway proxy error", type: "proxy_error" },
+            })}\n\n`,
+          );
+        } catch {
+          /* response may already be closed */
+        }
+        res.end();
+      }
     }
   }
 }
