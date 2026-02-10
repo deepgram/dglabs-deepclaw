@@ -181,6 +181,21 @@ export const ToolsWebSearchSchema = z
         apiKey: z.string().optional(),
         baseUrl: z.string().optional(),
         model: z.string().optional(),
+        searchContextSize: z
+          .union([z.literal("low"), z.literal("medium"), z.literal("high")])
+          .optional(),
+        searchRecencyFilter: z
+          .union([
+            z.literal("hour"),
+            z.literal("day"),
+            z.literal("week"),
+            z.literal("month"),
+            z.literal("year"),
+          ])
+          .optional(),
+        searchDomainFilter: z.array(z.string()).optional(),
+        returnRelatedQuestions: z.boolean().optional(),
+        systemPrompt: z.string().optional(),
       })
       .strict()
       .optional(),

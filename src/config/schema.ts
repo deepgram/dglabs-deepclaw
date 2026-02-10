@@ -486,6 +486,16 @@ const FIELD_HELP: Record<string, string> = {
     "Perplexity base URL override (default: https://openrouter.ai/api/v1 or https://api.perplexity.ai).",
   "tools.web.search.perplexity.model":
     'Perplexity model override (default: "perplexity/sonar-pro").',
+  "tools.web.search.perplexity.searchContextSize":
+    'How much web content to retrieve: "low", "medium", or "high" (default: "high").',
+  "tools.web.search.perplexity.searchRecencyFilter":
+    'Default recency filter: "hour", "day", "week", "month", or "year".',
+  "tools.web.search.perplexity.searchDomainFilter":
+    'Domain allowlist/denylist array (prefix with "-" to exclude, e.g. ["-reddit.com"]).',
+  "tools.web.search.perplexity.returnRelatedQuestions":
+    "Return related follow-up questions from Perplexity (default: false).",
+  "tools.web.search.perplexity.systemPrompt":
+    "System prompt for Perplexity response formatting (does not affect search, only LLM output).",
   "tools.web.fetch.enabled": "Enable the web_fetch tool (lightweight HTTP fetch).",
   "tools.web.fetch.maxChars": "Max characters returned by web_fetch (truncated).",
   "tools.web.fetch.maxCharsCap":

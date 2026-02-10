@@ -354,6 +354,16 @@ export type ToolsConfig = {
         baseUrl?: string;
         /** Model to use (defaults to "perplexity/sonar-pro"). */
         model?: string;
+        /** How much web content to retrieve: "low", "medium", or "high" (default: "high"). */
+        searchContextSize?: "low" | "medium" | "high";
+        /** Default recency filter: "hour", "day", "week", "month", or "year". */
+        searchRecencyFilter?: "hour" | "day" | "week" | "month" | "year";
+        /** Domain allowlist/denylist (prefix with "-" to exclude, e.g. ["-reddit.com"]). */
+        searchDomainFilter?: string[];
+        /** Return related follow-up questions (default: false). */
+        returnRelatedQuestions?: boolean;
+        /** System prompt for response formatting (does NOT affect search, only LLM output). */
+        systemPrompt?: string;
       };
       /** Grok-specific configuration (used when provider="grok"). */
       grok?: {
