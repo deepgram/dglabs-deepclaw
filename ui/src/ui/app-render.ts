@@ -62,6 +62,7 @@ const debouncedLoadUsage = (state: UsageState) => {
   }
   usageDateDebounceTimeout = window.setTimeout(() => void loadUsage(state), 400);
 };
+import { renderMobileTabBar } from "./mobile-tab-bar.ts";
 import { renderAgents } from "./views/agents.ts";
 import { renderChannels } from "./views/channels.ts";
 import { renderChat } from "./views/chat.ts";
@@ -1215,6 +1216,7 @@ export function renderApp(state: AppViewState) {
             : nothing
         }
       </main>
+      ${renderMobileTabBar(state, state.mobileMoreOpen, () => state.handleToggleMobileMore())}
       ${renderExecApprovalPrompt(state)}
       ${renderGatewayUrlConfirmation(state)}
     </div>

@@ -386,3 +386,10 @@ select {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* Safe-area insets for notched devices */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .topbar {
+    padding-top: max(0px, calc(env(safe-area-inset-top) - 8px));
+  }
+}
