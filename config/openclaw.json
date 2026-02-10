@@ -1,0 +1,298 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.2.6-3",
+    "lastTouchedAt": "2026-02-10T16:36:50.353Z"
+  },
+  "env": {
+    "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
+  },
+  "wizard": {
+    "lastRunAt": "2026-02-04T19:59:41.469Z",
+    "lastRunVersion": "2026.2.3",
+    "lastRunCommand": "configure",
+    "lastRunMode": "local"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "anthropic/claude-opus-4-5"
+      },
+      "models": {
+        "anthropic/claude-opus-4-5": {
+          "params": {
+            "cacheRetention": "short"
+          }
+        }
+      },
+      "workspace": "/home/node/.openclaw/workspace",
+      "contextPruning": {
+        "mode": "cache-ttl",
+        "ttl": "1h"
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "heartbeat": {
+        "every": "30m"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      },
+      "sandbox": {
+        "mode": "all",
+        // TODO: machine-specific — adjust per deployment
+        "workspaceRoot": "/Users/billgetman/openclaw/sandboxes",
+        "docker": {
+          "image": "openclaw-sandbox-dev:local",
+          "network": "openclaw-proxy",
+          "capDrop": ["ALL"],
+          "env": {
+            "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+            "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+            "HTTP_PROXY": "http://openclaw-squid-proxy:3128",
+            "HTTPS_PROXY": "http://openclaw-squid-proxy:3128",
+            "NO_PROXY": "localhost,127.0.0.1,host.docker.internal"
+          },
+          "pidsLimit": 512,
+          "memory": "8g",
+          "cpus": 4,
+          // TODO: machine-specific — adjust per deployment
+          "binds": ["/Users/billgetman/deepclaw:/deepclaw:rw"]
+        }
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "anthropic/claude-sonnet-4-5-20250929"
+      },
+      {
+        "id": "test-voice-agent",
+        "agentType": "voice",
+        "name": "Test Voice Agent",
+        "workspace": "/home/node/.openclaw/workspace/test-voice-agent",
+        "agentDir": "/home/node/.openclaw/agents/test-voice-agent/agent",
+        "model": {
+          "primary": "claude-haiku-4-5"
+        },
+        "skills": [
+          "healthcheck",
+          "notion",
+          "slack",
+          "summarize",
+          "voice-call",
+          "weather",
+          "calendar",
+          "glean-search",
+          "openai-image-gen",
+          "session-logs"
+        ],
+        "identity": {
+          "name": "Test Voice Agent"
+        }
+      }
+    ]
+  },
+  "tools": {
+    "deny": ["cron", "browser"]
+  },
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  "channels": {
+    "slack": {
+      "mode": "socket",
+      "webhookPath": "/slack/events",
+      "enabled": true,
+      "botToken": "${SLACK_BOT_TOKEN}",
+      "appToken": "${SLACK_APP_TOKEN}",
+      "userTokenReadOnly": true,
+      "groupPolicy": "allowlist",
+      "dm": {
+        "enabled": true,
+        "policy": "pairing"
+      },
+      "channels": {
+        "C0A4UQCUD6D": {
+          "allow": true
+        },
+        "#dg-labs": {
+          "allow": true
+        },
+        "#team-dglabs": {
+          "allow": true
+        },
+        "#bix-revops": {
+          "allow": true
+        }
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "lan",
+    "controlUi": {},
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "skills": {
+    "load": {
+      // TODO: machine-specific — adjust per deployment
+      "extraDirs": ["~/Documents/deepclaw-projects/deepclaw/skills"]
+    },
+    "install": {
+      "nodeManager": "npm"
+    },
+    "entries": {
+      "nano-banana-pro": {
+        "enabled": true,
+        "apiKey": "${GOOGLE_API_KEY}"
+      },
+      "deepclaw-voice": {
+        "enabled": false
+      },
+      "openai-whisper": {
+        "enabled": false
+      },
+      "openai-whisper-api": {
+        "enabled": false
+      },
+      "ordercli": {
+        "enabled": false
+      },
+      "peekaboo": {
+        "enabled": false
+      },
+      "oracle": {
+        "enabled": false
+      },
+      "sag": {
+        "enabled": false
+      },
+      "songsee": {
+        "enabled": false
+      },
+      "sonoscli": {
+        "enabled": false
+      },
+      "spotify-player": {
+        "enabled": false
+      },
+      "things-mac": {
+        "enabled": false
+      },
+      "trello": {
+        "enabled": false
+      },
+      "wacli": {
+        "enabled": false
+      },
+      "1password": {
+        "enabled": false
+      },
+      "apple-notes": {
+        "enabled": false
+      },
+      "bear-notes": {
+        "enabled": false
+      },
+      "apple-reminders": {
+        "enabled": false
+      },
+      "blogwatcher": {
+        "enabled": false
+      },
+      "blucli": {
+        "enabled": false
+      },
+      "bluebubbles": {
+        "enabled": false
+      },
+      "camsnap": {
+        "enabled": false
+      },
+      "clawhub": {
+        "enabled": false
+      },
+      "eightctl": {
+        "enabled": false
+      },
+      "github": {
+        "enabled": false
+      },
+      "gog": {
+        "enabled": false
+      },
+      "mcporter": {
+        "enabled": false
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "slack": {
+        "enabled": true
+      },
+      "voice-call": {
+        "enabled": true,
+        "config": {
+          "enabled": true,
+          "provider": "deepgram",
+          "defaultAgentId": "test-voice-agent",
+          "numbers": {
+            "+16087057765": {
+              "agentId": "test-voice-agent",
+              "direction": "both"
+            }
+          },
+          "fromNumber": "+16087057765",
+          "deepgram": {
+            "stt": {
+              "model": "nova-3"
+            },
+            "tts": {
+              "model": "aura-2-thalia-en"
+            },
+            "language": "en-US",
+            "latency": {
+              "fillerThresholdMs": 3000,
+              "fillerPhrases": [
+                "One moment please. ",
+                "Let me look into that. ",
+                "Sure, let me check. ",
+                "Just a moment. "
+              ]
+            }
+          },
+          "skipSignatureVerification": true,
+          "serve": {
+            "port": 3334,
+            "bind": "0.0.0.0",
+            "path": "/voice/webhook"
+          },
+          "timezone": "America/New_York",
+          "inboundPolicy": "open"
+        }
+      }
+    }
+  }
+}
