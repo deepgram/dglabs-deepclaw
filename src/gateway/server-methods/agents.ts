@@ -10,6 +10,7 @@ import {
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
+  DEFAULT_CALLS_FILENAME,
   DEFAULT_HEARTBEAT_FILENAME,
   DEFAULT_IDENTITY_FILENAME,
   DEFAULT_MEMORY_ALT_FILENAME,
@@ -52,6 +53,7 @@ const BOOTSTRAP_FILE_NAMES = [
   DEFAULT_USER_FILENAME,
   DEFAULT_HEARTBEAT_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
+  DEFAULT_CALLS_FILENAME,
 ] as const;
 
 const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
@@ -268,9 +270,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
         const newUserPath = path.join(workspaceDir, DEFAULT_USER_FILENAME);
         const defaultUserStat = await fs.stat(defaultUserPath).catch(() => null);
         if (defaultUserStat?.isFile()) {
-          // Remove the blank bootstrap USER.md and replace with a symlink.
+          // Remove the blank bootstrap USER.md and replace with a relative symlink.
+          // Relative symlinks work inside Docker where the mount point differs from the host.
+          const relTarget = path.relative(path.dirname(newUserPath), defaultUserPath);
           await fs.unlink(newUserPath).catch(() => {});
-          await fs.symlink(defaultUserPath, newUserPath);
+          await fs.symlink(relTarget, newUserPath);
         }
       }
     } catch {
