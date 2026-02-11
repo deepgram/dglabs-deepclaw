@@ -207,6 +207,33 @@
   color: var(--danger);
 }
 
+.pill-call {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  animation: call-pill-pulse 2s ease-in-out infinite;
+}
+
+@keyframes call-pill-pulse {
+  0%,
+  100% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 rgba(19, 239, 147, 0);
+  }
+  50% {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px rgba(19, 239, 147, 0.4);
+  }
+}
+
+.call-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
 /* ===========================================
    Theme Toggle
    =========================================== */

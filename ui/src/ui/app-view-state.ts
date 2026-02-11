@@ -10,6 +10,7 @@ import type { UiSettings } from "./storage.ts";
 import type { ThemeTransitionContext } from "./theme-transition.ts";
 import type { ThemeMode } from "./theme.ts";
 import type {
+  ActiveCallEntry,
   AgentsListResult,
   AgentsFilesListResult,
   AgentIdentityResult,
@@ -71,6 +72,8 @@ export type AppViewState = {
   chatThinkingLevel: string | null;
   chatQueue: ChatQueueItem[];
   chatManualRefreshInFlight: boolean;
+  activeCallCount: number;
+  activeCalls: ActiveCallEntry[];
   nodesLoading: boolean;
   nodes: Array<Record<string, unknown>>;
   chatNewMessagesBelow: boolean;

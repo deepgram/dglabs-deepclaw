@@ -248,6 +248,15 @@ export type NostrStatus = {
   profile?: NostrProfile | null;
 };
 
+export type ActiveCallEntry = {
+  callId: string;
+  direction: "inbound" | "outbound";
+  state: string;
+  from: string;
+  to: string;
+  startedAt: number;
+};
+
 export type VoiceCallNumberRouting = {
   number: string;
   agentId: string;

@@ -150,6 +150,16 @@ export function renderApp(state: AppViewState) {
           </div>
         </div>
         <div class="topbar-status">
+          ${
+            state.activeCallCount > 0
+              ? html`
+                <div class="pill pill-call">
+                  <span class="call-dot"></span>
+                  <span>${state.activeCallCount} ${state.activeCallCount === 1 ? "Call" : "Calls"}</span>
+                </div>
+              `
+              : nothing
+          }
           <div class="pill">
             <span class="statusDot ${state.connected ? "ok" : ""}"></span>
             <span>Health</span>

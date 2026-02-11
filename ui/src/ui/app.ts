@@ -213,6 +213,9 @@ export class OpenClawApp extends LitElement {
   @state() nostrProfileFormState: NostrProfileFormState | null = null;
   @state() nostrProfileAccountId: string | null = null;
 
+  @state() activeCallCount: number = 0;
+  @state() activeCalls: import("./types.ts").ActiveCallEntry[] = [];
+
   @state() presenceLoading = false;
   @state() presenceEntries: PresenceEntry[] = [];
   @state() presenceError: string | null = null;
@@ -362,6 +365,7 @@ export class OpenClawApp extends LitElement {
   private chatHasAutoScrolled = false;
   private chatUserNearBottom = true;
   @state() chatNewMessagesBelow = false;
+  private activeCallsPollInterval: number | null = null;
   private nodesPollInterval: number | null = null;
   private logsPollInterval: number | null = null;
   private debugPollInterval: number | null = null;
