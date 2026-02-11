@@ -8,6 +8,7 @@ const {
   resolveGrokApiKey,
   resolveGrokModel,
   resolveGrokInlineCitations,
+  resolvePerplexitySearchDomainFilter,
 } = __testing;
 
 describe("web_search perplexity baseUrl defaults", () => {
@@ -72,6 +73,33 @@ describe("web_search freshness normalization", () => {
     expect(normalizeFreshness("2024-13-01to2024-01-31")).toBeUndefined();
     expect(normalizeFreshness("2024-02-30to2024-03-01")).toBeUndefined();
     expect(normalizeFreshness("2024-03-10to2024-03-01")).toBeUndefined();
+  });
+});
+
+describe("web_search perplexity domain filter normalization", () => {
+  it("lowercases and sorts domains", () => {
+    expect(
+      resolvePerplexitySearchDomainFilter({
+        searchDomainFilter: ["Reddit.com", "arxiv.org", "Github.COM"],
+      }),
+    ).toEqual(["arxiv.org", "github.com", "reddit.com"]);
+  });
+
+  it("filters out empty/whitespace-only entries", () => {
+    expect(
+      resolvePerplexitySearchDomainFilter({
+        searchDomainFilter: ["example.com", "  ", ""],
+      }),
+    ).toEqual(["example.com"]);
+  });
+
+  it("returns undefined for empty array", () => {
+    expect(resolvePerplexitySearchDomainFilter({ searchDomainFilter: [] })).toBeUndefined();
+  });
+
+  it("returns undefined when not configured", () => {
+    expect(resolvePerplexitySearchDomainFilter({})).toBeUndefined();
+    expect(resolvePerplexitySearchDomainFilter(undefined)).toBeUndefined();
   });
 });
 

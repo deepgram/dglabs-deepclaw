@@ -66,6 +66,12 @@ const WebSearchSchema = Type.Object({
         "Filter results by discovery time (Brave only). Values: 'pd' (past 24h), 'pw' (past week), 'pm' (past month), 'py' (past year), or date range 'YYYY-MM-DDtoYYYY-MM-DD'.",
     }),
   ),
+  recency: Type.Optional(
+    Type.String({
+      description:
+        "Filter by recency (Perplexity only). Values: 'hour', 'day', 'week', 'month', 'year'.",
+    }),
+  ),
 });
 
 type WebSearchConfig = NonNullable<OpenClawConfig["tools"]>["web"] extends infer Web
@@ -91,6 +97,11 @@ type PerplexityConfig = {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  searchContextSize?: string;
+  searchRecencyFilter?: string;
+  searchDomainFilter?: string[];
+  returnRelatedQuestions?: boolean;
+  systemPrompt?: string;
 };
 
 type PerplexityApiKeySource = "config" | "perplexity_env" | "openrouter_env" | "none";
@@ -118,6 +129,7 @@ type PerplexitySearchResponse = {
     };
   }>;
   citations?: string[];
+  related_questions?: string[];
 };
 
 type PerplexityBaseUrlHint = "direct" | "openrouter";
@@ -277,6 +289,48 @@ function resolvePerplexityModel(perplexity?: PerplexityConfig): string {
   return fromConfig || DEFAULT_PERPLEXITY_MODEL;
 }
 
+const PERPLEXITY_RECENCY_VALUES = new Set(["hour", "day", "week", "month", "year"]);
+
+function resolvePerplexitySearchContextSize(perplexity?: PerplexityConfig): string {
+  const fromConfig = perplexity?.searchContextSize?.trim().toLowerCase() ?? "";
+  if (fromConfig === "low" || fromConfig === "medium" || fromConfig === "high") {
+    return fromConfig;
+  }
+  return "high";
+}
+
+function resolvePerplexitySearchRecencyFilter(
+  perplexity?: PerplexityConfig,
+  agentArg?: string,
+): string | undefined {
+  const value =
+    agentArg?.trim().toLowerCase() || perplexity?.searchRecencyFilter?.trim().toLowerCase();
+  if (value && PERPLEXITY_RECENCY_VALUES.has(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+function resolvePerplexitySearchDomainFilter(perplexity?: PerplexityConfig): string[] | undefined {
+  const domains = perplexity?.searchDomainFilter;
+  if (!Array.isArray(domains) || domains.length === 0) {
+    return undefined;
+  }
+  return domains
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean)
+    .toSorted();
+}
+
+function resolvePerplexitySystemPrompt(perplexity?: PerplexityConfig): string | undefined {
+  const prompt = perplexity?.systemPrompt?.trim();
+  return prompt || undefined;
+}
+
+function resolvePerplexityReturnRelatedQuestions(perplexity?: PerplexityConfig): boolean {
+  return perplexity?.returnRelatedQuestions === true;
+}
+
 function resolveGrokConfig(search?: WebSearchConfig): GrokConfig {
   if (!search || typeof search !== "object") {
     return {};
@@ -375,8 +429,37 @@ async function runPerplexitySearch(params: {
   baseUrl: string;
   model: string;
   timeoutSeconds: number;
-}): Promise<{ content: string; citations: string[] }> {
+  searchContextSize?: string;
+  searchRecencyFilter?: string;
+  searchDomainFilter?: string[];
+  returnRelatedQuestions?: boolean;
+  systemPrompt?: string;
+}): Promise<{ content: string; citations: string[]; relatedQuestions?: string[] }> {
   const endpoint = `${params.baseUrl.replace(/\/$/, "")}/chat/completions`;
+
+  const messages: Array<{ role: string; content: string }> = [];
+  if (params.systemPrompt) {
+    messages.push({ role: "system", content: params.systemPrompt });
+  }
+  messages.push({ role: "user", content: params.query });
+
+  const body: Record<string, unknown> = {
+    model: params.model,
+    messages,
+    web_search_options: {
+      search_context_size: params.searchContextSize ?? "high",
+    },
+  };
+
+  if (params.searchRecencyFilter) {
+    body.search_recency_filter = params.searchRecencyFilter;
+  }
+  if (params.searchDomainFilter?.length) {
+    body.search_domain_filter = params.searchDomainFilter;
+  }
+  if (params.returnRelatedQuestions) {
+    body.return_related_questions = true;
+  }
 
   const res = await fetch(endpoint, {
     method: "POST",
@@ -386,15 +469,7 @@ async function runPerplexitySearch(params: {
       "HTTP-Referer": "https://openclaw.ai",
       "X-Title": "OpenClaw Web Search",
     },
-    body: JSON.stringify({
-      model: params.model,
-      messages: [
-        {
-          role: "user",
-          content: params.query,
-        },
-      ],
-    }),
+    body: JSON.stringify(body),
     signal: withTimeout(undefined, params.timeoutSeconds * 1000),
   });
 
@@ -406,8 +481,9 @@ async function runPerplexitySearch(params: {
   const data = (await res.json()) as PerplexitySearchResponse;
   const content = data.choices?.[0]?.message?.content ?? "No response";
   const citations = data.citations ?? [];
+  const relatedQuestions = data.related_questions;
 
-  return { content, citations };
+  return { content, citations, relatedQuestions };
 }
 
 async function runGrokSearch(params: {
@@ -472,6 +548,11 @@ async function runWebSearch(params: {
   freshness?: string;
   perplexityBaseUrl?: string;
   perplexityModel?: string;
+  perplexitySearchContextSize?: string;
+  perplexitySearchRecencyFilter?: string;
+  perplexitySearchDomainFilter?: string[];
+  perplexityReturnRelatedQuestions?: boolean;
+  perplexitySystemPrompt?: string;
   grokModel?: string;
   grokInlineCitations?: boolean;
 }): Promise<Record<string, unknown>> {
@@ -479,7 +560,7 @@ async function runWebSearch(params: {
     params.provider === "brave"
       ? `${params.provider}:${params.query}:${params.count}:${params.country || "default"}:${params.search_lang || "default"}:${params.ui_lang || "default"}:${params.freshness || "default"}`
       : params.provider === "perplexity"
-        ? `${params.provider}:${params.query}:${params.perplexityBaseUrl ?? DEFAULT_PERPLEXITY_BASE_URL}:${params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL}`
+        ? `${params.provider}:${params.query}:${params.perplexityBaseUrl ?? DEFAULT_PERPLEXITY_BASE_URL}:${params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL}:${params.perplexitySearchContextSize ?? "high"}:${params.perplexitySearchRecencyFilter ?? "none"}:${params.perplexitySearchDomainFilter?.join(",") ?? "none"}:${String(params.perplexityReturnRelatedQuestions ?? false)}:${params.perplexitySystemPrompt ?? "none"}`
         : `${params.provider}:${params.query}:${params.grokModel ?? DEFAULT_GROK_MODEL}:${String(params.grokInlineCitations ?? false)}`,
   );
   const cached = readCache(SEARCH_CACHE, cacheKey);
@@ -490,22 +571,41 @@ async function runWebSearch(params: {
   const start = Date.now();
 
   if (params.provider === "perplexity") {
-    const { content, citations } = await runPerplexitySearch({
+    const { content, citations, relatedQuestions } = await runPerplexitySearch({
       query: params.query,
       apiKey: params.apiKey,
       baseUrl: params.perplexityBaseUrl ?? DEFAULT_PERPLEXITY_BASE_URL,
       model: params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL,
       timeoutSeconds: params.timeoutSeconds,
+      searchContextSize: params.perplexitySearchContextSize,
+      searchRecencyFilter: params.perplexitySearchRecencyFilter,
+      searchDomainFilter: params.perplexitySearchDomainFilter,
+      returnRelatedQuestions: params.perplexityReturnRelatedQuestions,
+      systemPrompt: params.perplexitySystemPrompt,
     });
 
-    const payload = {
+    const searchParams: Record<string, unknown> = {
+      searchContextSize: params.perplexitySearchContextSize ?? "high",
+    };
+    if (params.perplexitySearchRecencyFilter) {
+      searchParams.searchRecencyFilter = params.perplexitySearchRecencyFilter;
+    }
+    if (params.perplexitySearchDomainFilter?.length) {
+      searchParams.searchDomainFilter = params.perplexitySearchDomainFilter;
+    }
+
+    const payload: Record<string, unknown> = {
       query: params.query,
       provider: params.provider,
       model: params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL,
+      searchParams,
       tookMs: Date.now() - start,
       content: wrapWebContent(content),
       citations,
     };
+    if (relatedQuestions?.length) {
+      payload.relatedQuestions = relatedQuestions;
+    }
     writeCache(SEARCH_CACHE, cacheKey, payload, params.cacheTtlMs);
     return payload;
   }
@@ -608,7 +708,7 @@ export function createWebSearchTool(options?: {
 
   const description =
     provider === "perplexity"
-      ? "Search the web using Perplexity Sonar (direct or via OpenRouter). Returns AI-synthesized answers with citations from real-time web search."
+      ? "Search the web using Perplexity Sonar. Returns AI-synthesized answers with citations from real-time web search. Supports recency filter (hour/day/week/month/year) via the recency parameter."
       : provider === "grok"
         ? "Search the web using xAI Grok. Returns AI-synthesized answers with citations from real-time web search."
         : "Search the web using Brave Search API. Supports region-specific and localized search via country and language parameters. Returns titles, URLs, and snippets for fast research.";
@@ -655,6 +755,21 @@ export function createWebSearchTool(options?: {
           docs: "https://docs.openclaw.ai/tools/web",
         });
       }
+      const rawRecency = readStringParam(params, "recency");
+      if (rawRecency && provider !== "perplexity") {
+        return jsonResult({
+          error: "unsupported_recency",
+          message: "recency is only supported by the Perplexity web_search provider.",
+          docs: "https://docs.openclaw.ai/tools/web",
+        });
+      }
+      if (rawRecency && !PERPLEXITY_RECENCY_VALUES.has(rawRecency.trim().toLowerCase())) {
+        return jsonResult({
+          error: "invalid_recency",
+          message: "recency must be one of hour, day, week, month, year.",
+          docs: "https://docs.openclaw.ai/tools/web",
+        });
+      }
       const result = await runWebSearch({
         query,
         count: resolveSearchCount(count, DEFAULT_SEARCH_COUNT),
@@ -672,6 +787,14 @@ export function createWebSearchTool(options?: {
           perplexityAuth?.apiKey,
         ),
         perplexityModel: resolvePerplexityModel(perplexityConfig),
+        perplexitySearchContextSize: resolvePerplexitySearchContextSize(perplexityConfig),
+        perplexitySearchRecencyFilter: resolvePerplexitySearchRecencyFilter(
+          perplexityConfig,
+          rawRecency ?? undefined,
+        ),
+        perplexitySearchDomainFilter: resolvePerplexitySearchDomainFilter(perplexityConfig),
+        perplexityReturnRelatedQuestions: resolvePerplexityReturnRelatedQuestions(perplexityConfig),
+        perplexitySystemPrompt: resolvePerplexitySystemPrompt(perplexityConfig),
         grokModel: resolveGrokModel(grokConfig),
         grokInlineCitations: resolveGrokInlineCitations(grokConfig),
       });
@@ -687,4 +810,5 @@ export const __testing = {
   resolveGrokApiKey,
   resolveGrokModel,
   resolveGrokInlineCitations,
+  resolvePerplexitySearchDomainFilter,
 } as const;
