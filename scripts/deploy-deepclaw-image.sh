@@ -22,6 +22,14 @@ FLY_CONFIG="$REPO_ROOT/fly.deepclaw.toml"
 echo "==> Building and pushing DeepClaw image..."
 fly deploy "$REPO_ROOT" -a "$FLY_APP" --config "$FLY_CONFIG"
 
+echo "==> Capturing image reference from deployed machines..."
+IMAGE=$(fly machines list -a "$FLY_APP" --json | jq -r '.[0] | "\(.image_ref.registry)/\(.image_ref.repository):\(.image_ref.tag)"')
+if [ -z "$IMAGE" ] || [ "$IMAGE" = "null" ]; then
+  echo "ERROR: Could not extract image reference from machines" >&2
+  exit 1
+fi
+echo "    Image: $IMAGE"
+
 echo "==> Destroying default machines created by fly deploy..."
 MACHINE_IDS=$(fly machines list -a "$FLY_APP" --json | jq -r '.[].id')
 for id in $MACHINE_IDS; do
@@ -30,10 +38,6 @@ for id in $MACHINE_IDS; do
 done
 
 echo ""
-echo "==> Image pushed to registry.fly.io/$FLY_APP"
-echo ""
-echo "Next step — update the control plane secret with the new tag:"
-fly releases -a $FLY_APP --image
-fly secrets set OPENCLAW_IMAGE="registry.fly.io/$FLY_APP:<tag>" -a deepclaw-control
-echo "  fly releases -a $FLY_APP --image"
-echo "  fly secrets set OPENCLAW_IMAGE=\"registry.fly.io/$FLY_APP:<tag>\" -a deepclaw-control"
+echo "==> Updating control plane secret..."
+fly secrets set OPENCLAW_IMAGE="$IMAGE" -a deepclaw-control
+echo "==> Done. OPENCLAW_IMAGE set to $IMAGE"
