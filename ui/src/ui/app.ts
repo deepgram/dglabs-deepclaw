@@ -244,6 +244,7 @@ export class OpenClawApp extends LitElement {
 
   @state() agentModelCatalog: ModelCatalogEntry[] = [];
   @state() agentModelCatalogLoading = false;
+  @state() agentModelEditing = false;
 
   @state() identityDraftName: string | null = null;
   @state() identityDraftEmoji: string | null = null;

@@ -2184,6 +2184,62 @@
   font-size: 12px;
 }
 
+/* Double-click-to-edit model field */
+.agent-kv--editable {
+  cursor: default;
+  border-radius: 4px;
+  padding: 4px;
+  margin: -4px;
+  transition: background 0.15s ease;
+}
+
+.agent-kv--editable:hover {
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.04));
+}
+
+.agent-kv--editable .mono {
+  border-bottom: 1px dashed var(--border, rgba(255, 255, 255, 0.15));
+}
+
+.agent-kv--editing select {
+  width: 100%;
+  font: inherit;
+}
+
+.agent-model-advanced {
+  margin-top: 16px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  padding-top: 8px;
+}
+
+.agent-model-advanced > summary {
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-model-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-model-advanced > summary::marker {
+  content: "";
+}
+
+.agent-model-advanced > summary::before {
+  content: "\25B6";
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.agent-model-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+
 .agent-model-select {
   display: grid;
   gap: 12px;

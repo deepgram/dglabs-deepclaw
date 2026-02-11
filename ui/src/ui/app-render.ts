@@ -712,6 +712,13 @@ export function renderApp(state: AppViewState) {
                 skillsFilter: state.skillsFilter,
                 modelCatalog: state.agentModelCatalog,
                 modelCatalogLoading: state.agentModelCatalogLoading,
+                modelEditing: state.agentModelEditing,
+                onModelEditStart: () => {
+                  state.agentModelEditing = true;
+                },
+                onModelEditEnd: () => {
+                  state.agentModelEditing = false;
+                },
                 onModelCatalogRefresh: () => loadModelCatalog(state, { refresh: true }),
                 onAddAgentOpen: () => {
                   state.addAgentForm = { ...DEFAULT_ADD_AGENT_FORM };
@@ -731,6 +738,7 @@ export function renderApp(state: AppViewState) {
                     return;
                   }
                   state.agentsSelectedId = agentId;
+                  state.agentModelEditing = false;
                   state.identityDraftName = null;
                   state.identityDraftEmoji = null;
                   state.agentFilesList = null;

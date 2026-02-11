@@ -155,6 +155,7 @@ export type AppViewState = {
   agentSkillsAgentId: string | null;
   agentModelCatalog: ModelCatalogEntry[];
   agentModelCatalogLoading: boolean;
+  agentModelEditing: boolean;
   identityDraftName: string | null;
   identityDraftEmoji: string | null;
   identitySaving: boolean;

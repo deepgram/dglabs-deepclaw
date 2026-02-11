@@ -71,6 +71,9 @@ export type AgentsProps = {
   skillsFilter: string;
   modelCatalog: ModelCatalogEntry[];
   modelCatalogLoading: boolean;
+  modelEditing: boolean;
+  onModelEditStart: () => void;
+  onModelEditEnd: () => void;
   onModelCatalogRefresh: () => void;
   onRefresh: () => void;
   onSelectAgent: (agentId: string) => void;
@@ -748,6 +751,9 @@ export function renderAgents(props: AgentsProps) {
                       configDirty: props.configDirty,
                       modelCatalog: props.modelCatalog,
                       modelCatalogLoading: props.modelCatalogLoading,
+                      modelEditing: props.modelEditing,
+                      onModelEditStart: props.onModelEditStart,
+                      onModelEditEnd: props.onModelEditEnd,
                       onModelCatalogRefresh: props.onModelCatalogRefresh,
                       onConfigReload: props.onConfigReload,
                       onConfigSave: props.onConfigSave,
@@ -934,6 +940,9 @@ function renderAgentOverview(params: {
   configDirty: boolean;
   modelCatalog: ModelCatalogEntry[];
   modelCatalogLoading: boolean;
+  modelEditing: boolean;
+  onModelEditStart: () => void;
+  onModelEditEnd: () => void;
   onModelCatalogRefresh: () => void;
   onConfigReload: () => void;
   onConfigSave: () => void;
@@ -960,6 +969,9 @@ function renderAgentOverview(params: {
     configDirty,
     modelCatalog,
     modelCatalogLoading,
+    modelEditing,
+    onModelEditStart,
+    onModelEditEnd,
     onModelCatalogRefresh,
     onConfigReload,
     onConfigSave,
@@ -1009,9 +1021,59 @@ function renderAgentOverview(params: {
           <div class="label">Workspace</div>
           <div class="mono">${workspace}</div>
         </div>
-        <div class="agent-kv">
+        <div
+          class="agent-kv agent-kv--editable ${modelEditing ? "agent-kv--editing" : ""}"
+          @dblclick=${(e: Event) => {
+            if (!configForm || configLoading || configSaving) {
+              return;
+            }
+            onModelEditStart();
+            requestAnimationFrame(() => {
+              const container = e.currentTarget as HTMLElement;
+              const select = container.querySelector("select");
+              select?.focus();
+            });
+          }}
+        >
           <div class="label">Primary Model</div>
-          <div class="mono">${model}</div>
+          ${
+            modelEditing
+              ? html`
+                <select
+                  .value=${effectivePrimary ?? ""}
+                  @change=${(e: Event) => {
+                    onModelChange(agent.id, (e.target as HTMLSelectElement).value || null);
+                    onModelEditEnd();
+                  }}
+                  @blur=${() => onModelEditEnd()}
+                  @keydown=${(e: KeyboardEvent) => {
+                    if (e.key === "Escape") {
+                      onModelEditEnd();
+                    }
+                  }}
+                >
+                  ${
+                    isDefault
+                      ? nothing
+                      : html`
+                        <option value="">
+                          ${defaultPrimary ? `Inherit default (${defaultPrimary})` : "Inherit default"}
+                        </option>
+                      `
+                  }
+                  ${
+                    modelCatalog.length > 0
+                      ? buildCatalogModelOptions(
+                          modelCatalog,
+                          configForm,
+                          effectivePrimary ?? undefined,
+                        )
+                      : buildModelOptions(configForm, effectivePrimary ?? undefined)
+                  }
+                </select>
+              `
+              : html`<div class="mono">${model}</div>`
+          }
         </div>
         <div class="agent-kv">
           <div class="label">Identity Name</div>
@@ -1091,40 +1153,10 @@ function renderAgentOverview(params: {
           : nothing
       }
 
-      <div class="agent-model-select" style="margin-top: 20px;">
-        <div class="label">Model Selection</div>
-        <div class="row" style="gap: 12px; flex-wrap: wrap;">
-          <label class="field" style="min-width: 260px; flex: 1;">
-            <span>Primary model${isDefault ? " (default)" : ""}</span>
-            <select
-              .value=${effectivePrimary ?? ""}
-              ?disabled=${!configForm || configLoading || configSaving}
-              @change=${(e: Event) =>
-                onModelChange(agent.id, (e.target as HTMLSelectElement).value || null)}
-            >
-              ${
-                isDefault
-                  ? nothing
-                  : html`
-                      <option value="">
-                        ${
-                          defaultPrimary ? `Inherit default (${defaultPrimary})` : "Inherit default"
-                        }
-                      </option>
-                    `
-              }
-              ${
-                modelCatalog.length > 0
-                  ? buildCatalogModelOptions(
-                      modelCatalog,
-                      configForm,
-                      effectivePrimary ?? undefined,
-                    )
-                  : buildModelOptions(configForm, effectivePrimary ?? undefined)
-              }
-            </select>
-          </label>
-          <label class="field" style="min-width: 260px; flex: 1;">
+      <details class="agent-model-advanced">
+        <summary>Advanced model settings</summary>
+        <div style="display: grid; gap: 12px; padding: 12px 0;">
+          <label class="field">
             <span>Fallbacks (comma-separated)</span>
             <input
               .value=${fallbackText}
@@ -1137,32 +1169,32 @@ function renderAgentOverview(params: {
                 )}
             />
           </label>
+          <div class="row" style="justify-content: flex-end; gap: 8px;">
+            <button
+              class="btn btn--sm"
+              ?disabled=${modelCatalogLoading}
+              @click=${onModelCatalogRefresh}
+              title="Refresh model catalog"
+            >
+              ${modelCatalogLoading ? "Refreshing…" : "Refresh Models"}
+            </button>
+            <button
+              class="btn btn--sm"
+              ?disabled=${configLoading}
+              @click=${onConfigReload}
+            >
+              Reload Config
+            </button>
+            <button
+              class="btn btn--sm primary"
+              ?disabled=${configSaving || !configDirty}
+              @click=${onConfigSave}
+            >
+              ${configSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
         </div>
-        <div class="row" style="justify-content: flex-end; gap: 8px;">
-          <button
-            class="btn btn--sm"
-            ?disabled=${modelCatalogLoading}
-            @click=${onModelCatalogRefresh}
-            title="Refresh model catalog"
-          >
-            ${modelCatalogLoading ? "Refreshing…" : "Refresh Models"}
-          </button>
-          <button
-            class="btn btn--sm"
-            ?disabled=${configLoading}
-            @click=${onConfigReload}
-          >
-            Reload Config
-          </button>
-          <button
-            class="btn btn--sm primary"
-            ?disabled=${configSaving || !configDirty}
-            @click=${onConfigSave}
-          >
-            ${configSaving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
+      </details>
     </section>
   `;
 }
