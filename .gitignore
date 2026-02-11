@@ -63,10 +63,26 @@ apps/ios/*.dSYM.zip
 apps/ios/*.mobileprovision
 .env
 
+# Runtime data — sandboxes and bind-mount data
+data/sandboxes/
+data/deepclaw/
+
+# Workspace runtime artifacts (keep seed templates, ignore generated state)
+data/workspace/memory/
+data/workspace/**/memory/
+data/workspace/MEMORY.md
+data/workspace/**/CALLS.md
+data/workspace/**/.git/
+data/workspace/skills/
+
+# Config dir runtime artifacts (keep only openclaw.json)
+config/*
+!config/openclaw.json
+
 # Local untracked files
 .local/
-IDENTITY.md
-USER.md
+/IDENTITY.md
+/USER.md
 .tgz
 
 # local tooling

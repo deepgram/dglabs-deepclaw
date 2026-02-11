@@ -49,11 +49,11 @@
         "model": "anthropic/claude-sonnet-4-5-20250929"
       },
       {
-        "id": "test-voice-agent",
+        "id": "voice-agent",
         "agentType": "voice",
         "name": "Voice Agent",
-        "workspace": "/home/node/.openclaw/workspace/test-voice-agent",
-        "agentDir": "/home/node/.openclaw/agents/test-voice-agent/agent",
+        "workspace": "/home/node/.openclaw/workspace/voice-agent",
+        "agentDir": "/home/node/.openclaw/agents/voice-agent/agent",
         "model": {
           "primary": "claude-haiku-4-5"
         },
@@ -228,10 +228,10 @@
         "config": {
           "enabled": true,
           "provider": "deepgram",
-          "defaultAgentId": "test-voice-agent",
+          "defaultAgentId": "voice-agent",
           "numbers": {
             "+16087057765": {
-              "agentId": "test-voice-agent",
+              "agentId": "voice-agent",
               "direction": "both"
             }
           },
