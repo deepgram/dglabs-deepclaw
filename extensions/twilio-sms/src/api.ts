@@ -33,6 +33,11 @@ export async function sendTwilioSms(params: {
 
   const credentials = Buffer.from(`${account.accountSid}:${account.authToken}`).toString("base64");
 
+  const hasMedia = mediaUrls && mediaUrls.length > 0;
+  console.log(
+    `[twilio-sms] Sending SMS to=${to} from=${account.phoneNumber} bodyLen=${(text ?? "").length}${hasMedia ? ` mediaUrls=${mediaUrls.length}` : ""}`,
+  );
+
   const response = await fetch(`${TWILIO_API_BASE}/Accounts/${account.accountSid}/Messages.json`, {
     method: "POST",
     headers: {
@@ -44,10 +49,13 @@ export async function sendTwilioSms(params: {
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error(`[twilio-sms] SMS failed to=${to} status=${response.status} error=${errorText}`);
     throw new Error(`Twilio API error: ${response.status} ${errorText}`);
   }
 
-  return (await response.json()) as TwilioSmsSendResponse;
+  const result = (await response.json()) as TwilioSmsSendResponse;
+  console.log(`[twilio-sms] SMS sent sid=${result.sid} to=${to} status=${result.status}`);
+  return result;
 }
 
 export async function probeTwilioSms(account: ResolvedTwilioSmsAccount): Promise<{

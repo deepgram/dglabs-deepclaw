@@ -323,6 +323,25 @@ const voiceCallPlugin = {
       }
     });
 
+    api.registerGatewayMethod("voicecall.activeCalls", async ({ respond }) => {
+      try {
+        const calls = _sharedRuntime?.manager?.getActiveCalls?.() ?? [];
+        respond(true, {
+          count: calls.length,
+          calls: calls.map((c) => ({
+            callId: c.callId,
+            direction: c.direction,
+            state: c.state,
+            from: c.from,
+            to: c.to,
+            startedAt: c.startedAt,
+          })),
+        });
+      } catch (err) {
+        sendError(respond, err);
+      }
+    });
+
     api.registerGatewayMethod("voicecall.status", async ({ params, respond }) => {
       try {
         const raw =

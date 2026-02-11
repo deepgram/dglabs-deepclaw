@@ -4,7 +4,7 @@ import type { OpenClawApp } from "./app.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
-import { DEFAULT_ADD_AGENT_FORM } from "./app-defaults.ts";
+import { DEFAULT_ADD_AGENT_FORM, DEFAULT_CRON_FORM } from "./app-defaults.ts";
 import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
 import { submitAddAgent } from "./controllers/add-agent.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
@@ -27,6 +27,8 @@ import {
   runCronJob,
   removeCronJob,
   addCronJob,
+  updateCronJob,
+  cronJobToForm,
 } from "./controllers/cron.ts";
 import { loadDebug, callDebugMethod } from "./controllers/debug.ts";
 import {
@@ -150,6 +152,16 @@ export function renderApp(state: AppViewState) {
           </div>
         </div>
         <div class="topbar-status">
+          ${
+            state.activeCallCount > 0
+              ? html`
+                <div class="pill pill-call">
+                  <span class="call-dot"></span>
+                  <span>${state.activeCallCount} ${state.activeCallCount === 1 ? "Call" : "Calls"}</span>
+                </div>
+              `
+              : nothing
+          }
           <div class="pill">
             <span class="statusDot ${state.connected ? "ok" : ""}"></span>
             <span>Health</span>
@@ -602,9 +614,37 @@ export function renderApp(state: AppViewState) {
                 channelMeta: state.channelsSnapshot?.channelMeta ?? [],
                 runsJobId: state.cronRunsJobId,
                 runs: state.cronRuns,
+                editingJobId: state.cronEditingJobId,
+                formOpen: state.cronFormOpen,
                 onFormChange: (patch) => (state.cronForm = { ...state.cronForm, ...patch }),
                 onRefresh: () => state.loadCron(),
-                onAdd: () => addCronJob(state),
+                onNewJob: () => {
+                  state.cronEditingJobId = null;
+                  state.cronForm = { ...DEFAULT_CRON_FORM };
+                  state.cronFormOpen = true;
+                },
+                onAdd: async () => {
+                  await addCronJob(state);
+                  if (!state.cronError) {
+                    state.cronFormOpen = false;
+                  }
+                },
+                onSave: async () => {
+                  await updateCronJob(state);
+                  if (!state.cronError) {
+                    state.cronFormOpen = false;
+                  }
+                },
+                onEdit: (job) => {
+                  state.cronEditingJobId = job.id;
+                  state.cronForm = cronJobToForm(job);
+                  state.cronFormOpen = true;
+                },
+                onCancelEdit: () => {
+                  state.cronEditingJobId = null;
+                  state.cronForm = { ...DEFAULT_CRON_FORM };
+                  state.cronFormOpen = false;
+                },
                 onToggle: (job, enabled) => toggleCronJob(state, job, enabled),
                 onRun: (job) => runCronJob(state, job),
                 onRemove: (job) => removeCronJob(state, job),
@@ -672,6 +712,13 @@ export function renderApp(state: AppViewState) {
                 skillsFilter: state.skillsFilter,
                 modelCatalog: state.agentModelCatalog,
                 modelCatalogLoading: state.agentModelCatalogLoading,
+                modelEditing: state.agentModelEditing,
+                onModelEditStart: () => {
+                  state.agentModelEditing = true;
+                },
+                onModelEditEnd: () => {
+                  state.agentModelEditing = false;
+                },
                 onModelCatalogRefresh: () => loadModelCatalog(state, { refresh: true }),
                 onAddAgentOpen: () => {
                   state.addAgentForm = { ...DEFAULT_ADD_AGENT_FORM };
@@ -691,6 +738,7 @@ export function renderApp(state: AppViewState) {
                     return;
                   }
                   state.agentsSelectedId = agentId;
+                  state.agentModelEditing = false;
                   state.identityDraftName = null;
                   state.identityDraftEmoji = null;
                   state.agentFilesList = null;

@@ -13,6 +13,7 @@ import { TelnyxProvider } from "./providers/telnyx.js";
 import { TwilioProvider } from "./providers/twilio.js";
 import { createTelephonyTtsProvider } from "./telephony-tts.js";
 import { startTunnel, type TunnelResult } from "./tunnel.js";
+import { extractUserProfileFromCall } from "./user-profile-extraction.js";
 import {
   cleanupTailscaleExposure,
   setupTailscaleExposure,
@@ -240,6 +241,12 @@ export async function createVoiceCallRuntime(params: {
       },
       onCallEnded: (callRecord, agentId) => {
         void generateCallSummary({
+          voiceConfig: config,
+          coreConfig,
+          callRecord,
+          agentId,
+        });
+        void extractUserProfileFromCall({
           voiceConfig: config,
           coreConfig,
           callRecord,

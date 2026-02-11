@@ -213,6 +213,19 @@ export const CallSummaryConfigSchema = z
 export type CallSummaryConfig = z.infer<typeof CallSummaryConfigSchema>;
 
 // -----------------------------------------------------------------------------
+// User Profile Extraction Configuration
+// -----------------------------------------------------------------------------
+
+export const UserProfileConfigSchema = z
+  .object({
+    /** Enable post-call user profile extraction (merges into USER.md in agent workspace) */
+    enabled: z.boolean().default(true),
+  })
+  .strict()
+  .default({ enabled: true });
+export type UserProfileConfig = z.infer<typeof UserProfileConfigSchema>;
+
+// -----------------------------------------------------------------------------
 // Webhook Server Configuration
 // -----------------------------------------------------------------------------
 
@@ -474,6 +487,9 @@ export const VoiceCallConfigSchema = z
 
     /** Post-call summary configuration */
     callSummary: CallSummaryConfigSchema,
+
+    /** Post-call user profile extraction configuration */
+    userProfile: UserProfileConfigSchema,
   })
   .strict();
 

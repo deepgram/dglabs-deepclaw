@@ -25,6 +25,7 @@ import type { CallRecord, NormalizedEvent } from "./types.js";
 import { resolveAgentForNumber } from "./config.js";
 import { loadCoreAgentDeps } from "./core-bridge.js";
 import { TerminalStates } from "./types.js";
+import { parseUserMarkdown } from "./user-md-parser.js";
 
 /**
  * Configuration for the Deepgram media bridge.
@@ -370,28 +371,45 @@ export class DeepgramMediaBridge {
     );
 
     // Load caller context from workspace files (USER.md, CALLS.md)
-    let callerContext = "";
     let callerName: string | undefined;
+    const callerContextLines: string[] = [];
     try {
       if (this.config.coreConfig) {
         const deps = await loadCoreAgentDeps();
         const workspaceDir = deps.resolveAgentWorkspaceDir(this.config.coreConfig, agentId);
+
+        // Parse USER.md with proper parser
         const userMdPath = `${workspaceDir}/USER.md`;
         try {
           const userMd = await fs.readFile(userMdPath, "utf-8");
-          const nameMatch = userMd.match(/\*\*Name:\*\*\s*(.+)/);
-          callerName = nameMatch?.[1]?.trim() || undefined;
+          const userProfile = parseUserMarkdown(userMd);
+          callerName = userProfile.callName || userProfile.name;
           if (callerName) {
-            callerContext += `The caller's name is ${callerName}. Greet them by name.\n`;
+            callerContextLines.push(`The caller's name is ${callerName}. Greet them by name.`);
+          }
+          if (userProfile.notes) {
+            callerContextLines.push(`About the caller: ${userProfile.notes}`);
+          }
+          if (userProfile.context) {
+            callerContextLines.push(`Context: ${userProfile.context}`);
           }
         } catch {
           // USER.md not found or unreadable — skip
         }
+
+        // Parse CALLS.md for rich recent call context
         const callsMdPath = `${workspaceDir}/CALLS.md`;
         try {
           const callsMd = await fs.readFile(callsMdPath, "utf-8");
-          if (callsMd.includes("###")) {
-            callerContext += `You have previous call history with this caller. You can reference it naturally.\n`;
+          const recentEntries = getRecentCallEntries(callsMd, 3);
+          if (recentEntries.length > 0) {
+            callerContextLines.push(`Recent calls with this person:`);
+            for (const entry of recentEntries) {
+              callerContextLines.push(`- ${entry}`);
+            }
+            callerContextLines.push(
+              `Reference ONE specific detail from a recent call naturally within the first 15 seconds. Keep it casual — not a data dump.`,
+            );
           }
         } catch {
           // CALLS.md not found — skip
@@ -401,17 +419,23 @@ export class DeepgramMediaBridge {
       console.warn("[DeepgramBridge] Failed to load caller context:", err);
     }
 
-    // Personalize the initial greeting if we know the caller's name
-    if (callerName && call?.metadata?.initialMessage) {
-      const greetings = [
-        `Hey ${callerName}! What's going on?`,
-        `${callerName}, hey! What can I do for you?`,
-        `Hey ${callerName}, good to hear from you. What's up?`,
-        `${callerName}! What's on your mind?`,
-        `Hey there ${callerName}. How can I help?`,
-        `${callerName}, what's up?`,
-      ];
-      call.metadata.initialMessage = greetings[Math.floor(Math.random() * greetings.length)];
+    // Personalize the initial greeting
+    if (call?.metadata?.initialMessage) {
+      if (callerName) {
+        const greetings = [
+          `Hey ${callerName}! What's going on?`,
+          `${callerName}, hey! What can I do for you?`,
+          `Hey ${callerName}, good to hear from you. What's up?`,
+          `${callerName}! What's on your mind?`,
+          `Hey there ${callerName}. How can I help?`,
+          `${callerName}, what's up?`,
+        ];
+        call.metadata.initialMessage = greetings[Math.floor(Math.random() * greetings.length)];
+      } else if (callerContextLines.length === 0) {
+        // First call — establish it's a fresh setup, kick off mutual introductions
+        call.metadata.initialMessage =
+          "Hey! This is a fresh DeepClaw setup, so we're just getting to know each other. What should I call you?";
+      }
     }
 
     // Build system prompt with voice-specific behavioral instructions only.
@@ -436,11 +460,23 @@ export class DeepgramMediaBridge {
       `Speak naturally as if in a real phone conversation.`,
       `IMPORTANT: Your responses will be spoken aloud via text-to-speech. Do NOT use any text formatting — no markdown, no bullet points, no asterisks, no numbered lists, no headers. Write plain conversational sentences only.`,
       `Do NOT start your response with filler phrases like "Let me check" or "One moment" — that is handled automatically. Jump straight into the answer.`,
+      `If a request is ambiguous or you're unsure what the caller means, ask a quick clarifying question before acting. Don't guess or add requirements they didn't ask for.`,
       `Today is ${localTime}. Always present times in this timezone.`,
       `The caller's phone number is ${callerNumber}.`,
     ];
-    if (callerContext) {
-      promptLines.push(callerContext.trim());
+    if (callerContextLines.length > 0) {
+      promptLines.push(...callerContextLines);
+    } else {
+      // First call — no USER.md data, no CALLS.md. Guide the onboarding.
+      const nameLabel = agentName !== "Assistant" ? agentName : "your AI voice assistant";
+      promptLines.push(
+        `This is a brand new setup — you've never spoken with this caller before.`,
+        `Introduce yourself as ${nameLabel}. Be warm and confident, not robotic.`,
+        `Within the first exchange, naturally ask what they'd like you to call them.`,
+        `Give a brief taste of what you can do — answer questions, help think through problems, look things up, set reminders, make calls. Keep it to one or two examples, don't list everything.`,
+        `If you don't have a name yet (IDENTITY.md is blank), pick one that feels right and tell them. Own it.`,
+        `The goal is: by the end of this call, you know each other's names and the caller has a feel for what you're about.`,
+      );
     }
     const systemPrompt = promptLines.join("\n");
 
@@ -538,6 +574,16 @@ export class DeepgramMediaBridge {
     }
     this.sessions.clear();
   }
+}
+
+/**
+ * Extract the most recent call entries from CALLS.md content.
+ * Each entry starts with `### ` (h3 heading). Returns the last `count` entries
+ * as single-line summaries (heading text only, trimmed).
+ */
+function getRecentCallEntries(callsMd: string, count: number): string[] {
+  const parts = callsMd.split(/(?=^### )/m).slice(1); // skip content before first entry
+  return parts.slice(-count).map((entry) => entry.replace(/^### /, "").split("\n")[0]!.trim());
 }
 
 /**
