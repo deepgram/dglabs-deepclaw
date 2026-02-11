@@ -95,7 +95,7 @@ echo "==> Step 3: Truncating DB tables..."
 DB_APP="${PREFIX}-db"
 DB_NAME="${PREFIX}_control"
 
-DB_OUTPUT=$(echo "TRUNCATE TABLE pool_machines, api_keys, machines, users CASCADE; SELECT count(*) AS remaining_users FROM users;" \
+DB_OUTPUT=$(printf '%s\n' "TRUNCATE TABLE pool_machines, api_keys, machines, users CASCADE;" "SELECT count(*) AS remaining_users FROM users;" '\q' \
   | fly postgres connect -a "$DB_APP" -d "$DB_NAME" 2>&1 || true)
 
 if echo "$DB_OUTPUT" | grep -q "TRUNCATE TABLE"; then

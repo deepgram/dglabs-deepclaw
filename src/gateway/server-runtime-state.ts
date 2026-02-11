@@ -172,7 +172,17 @@ export async function createGatewayRuntimeState(params: {
     maxPayload: MAX_PAYLOAD_BYTES,
   });
   const dictationHandler = createDictationUpgradeHandler({ log: params.logDictation });
-  const voiceStreamHandler = createVoiceStreamUpgradeHandler({ log: params.logVoiceStream });
+  const voiceCallPluginConfig = params.cfg.plugins?.entries?.["voice-call"]?.config as
+    | Record<string, unknown>
+    | undefined;
+  const voiceDefaultAgentId =
+    typeof voiceCallPluginConfig?.defaultAgentId === "string"
+      ? voiceCallPluginConfig.defaultAgentId
+      : undefined;
+  const voiceStreamHandler = createVoiceStreamUpgradeHandler({
+    log: params.logVoiceStream,
+    defaultAgentId: voiceDefaultAgentId,
+  });
   for (const server of httpServers) {
     attachGatewayUpgradeHandler({
       httpServer: server,

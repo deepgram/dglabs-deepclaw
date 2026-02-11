@@ -51,6 +51,8 @@ ENV NODE_COMPILE_CACHE=/home/node/.cache/node
 USER node
 RUN mkdir -p /home/node/.openclaw
 COPY --chown=node:node config/openclaw.json /home/node/.openclaw/openclaw.json
+COPY --chown=node:node config/workspace /home/node/.openclaw/workspace
+COPY --chown=node:node config/workspace /home/node/.openclaw/workspace/test-voice-agent
 RUN timeout 15 node /app/openclaw.mjs gateway --port 18789 --bind lan \
     --allow-unconfigured --verbose --token warmup 2>&1 || true
 USER root

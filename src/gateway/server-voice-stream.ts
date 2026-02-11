@@ -323,8 +323,10 @@ export type VoiceStreamUpgradeHandler = (
 
 export function createVoiceStreamUpgradeHandler(opts: {
   log: SubsystemLogger;
+  defaultAgentId?: string;
 }): VoiceStreamUpgradeHandler {
   const { log } = opts;
+  const fallbackAgentId = opts.defaultAgentId ?? "main";
 
   return (req: IncomingMessage, socket: Duplex, head: Buffer, wss: WebSocketServer): boolean => {
     const reqUrl = new URL(req.url ?? "/", "http://localhost");
@@ -345,6 +347,7 @@ export function createVoiceStreamUpgradeHandler(opts: {
     const userId = getHeader(req, "x-deepclaw-user-id");
     const callSid = getHeader(req, "x-deepclaw-call-sid");
     const phoneNumber = getHeader(req, "x-deepclaw-phone-number");
+    const agentId = getHeader(req, "x-deepclaw-agent-id") ?? fallbackAgentId;
 
     log.info(
       `voice-stream: upgrade (format=${streamFormat}, userId=${userId}, callSid=${callSid})`,
@@ -376,8 +379,8 @@ export function createVoiceStreamUpgradeHandler(opts: {
       const llmEndpoint = resolveLlmEndpoint();
       if (llmEndpoint && callSid) {
         // Add per-call session headers for gateway routing
-        llmEndpoint.headers["x-openclaw-session-key"] = `agent:main:voice:${callSid}`;
-        llmEndpoint.headers["x-openclaw-agent-id"] = "main";
+        llmEndpoint.headers["x-openclaw-session-key"] = `agent:${agentId}:voice:${callSid}`;
+        llmEndpoint.headers["x-openclaw-agent-id"] = agentId;
       }
 
       const config: DeepgramVoiceAgentConfig = {
