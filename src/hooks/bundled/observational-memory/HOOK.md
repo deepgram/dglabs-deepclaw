@@ -30,6 +30,8 @@ After each agent turn completes:
 
 Because `OBSERVATIONS.md` is a workspace bootstrap file, it is automatically injected into the agent's system prompt on every turn — no tool calls needed.
 
+**Note:** The observer only runs for top-level agent turns. Subagent/embedded calls (e.g. memory-flush, slug-generator) do not fire `agent:turn-complete` events, so the observer is never triggered by internal sidecar LLM calls.
+
 ## Observation Format
 
 ```markdown
@@ -96,6 +98,15 @@ By default, the observer uses the agent's configured model. For cost efficiency,
   }
 }
 ```
+
+## Configuration Split
+
+Configuration lives in two places:
+
+- **Hook-level config** (`hooks.internal.entries.observational-memory.*`) — controls hook behavior: turn frequency, message count, size thresholds
+- **Agent-level config** (`agents.defaults.observationalMemory.*`) — controls model selection and enable/disable: provider, model, enabled
+
+This split keeps model configuration alongside other agent defaults while hook-specific tuning stays with the hook system.
 
 ## Disabling
 

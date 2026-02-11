@@ -24,17 +24,31 @@ import {
 
 const log = createSubsystemLogger("hooks/observational-memory");
 
-/** In-memory turn counter per session key (resets on process restart, which is acceptable). */
-const turnCounters = new Map<string, number>();
+log.info("Observational memory hook loaded");
 
-/** Prevent concurrent observer runs per session. */
-const activeSessions = new Set<string>();
+/**
+ * In-memory turn counter per session key (resets on process restart, which is acceptable).
+ * Entries are evicted when the map exceeds MAX_TURN_COUNTER_ENTRIES to prevent unbounded growth.
+ */
+const turnCounters = new Map<string, { count: number; lastSeen: number }>();
+const MAX_TURN_COUNTER_ENTRIES = 500;
+
+/** Prevent concurrent observer runs per workspace directory. */
+const activeWorkspaces = new Set<string>();
 
 const DEFAULT_MESSAGES = 20;
 const DEFAULT_TRIGGER_EVERY_N_TURNS = 3;
 const DEFAULT_MAX_OBSERVATIONS_CHARS = 15_000;
 const DEFAULT_REFLECTOR_THRESHOLD_CHARS = 12_000;
 const OBSERVER_TIMEOUT_MS = 30_000;
+const MAX_SESSION_CONTENT_CHARS = 8_000;
+
+/**
+ * Minimum ratio of new content length to existing content length.
+ * If the observer returns content shorter than this ratio * existing length,
+ * we skip the write to prevent data loss from truncated/hallucinated output.
+ */
+const MIN_CONTENT_RATIO = 0.3;
 
 type ObserverConfig = {
   messages: number;
@@ -64,6 +78,20 @@ function resolveObserverConfig(cfg: OpenClawConfig | undefined): ObserverConfig 
         ? hookConfig.reflectorThresholdChars
         : DEFAULT_REFLECTOR_THRESHOLD_CHARS,
   };
+}
+
+/**
+ * Evict oldest entries from turnCounters when it exceeds the size limit.
+ */
+function evictStaleCounters(): void {
+  if (turnCounters.size <= MAX_TURN_COUNTER_ENTRIES) {
+    return;
+  }
+  const entries = [...turnCounters.entries()].toSorted((a, b) => a[1].lastSeen - b[1].lastSeen);
+  const toRemove = entries.slice(0, entries.length - MAX_TURN_COUNTER_ENTRIES);
+  for (const [key] of toRemove) {
+    turnCounters.delete(key);
+  }
 }
 
 /**
@@ -111,6 +139,22 @@ async function getRecentSessionMessages(
 }
 
 /**
+ * Truncate session content at the last complete message boundary before maxChars.
+ */
+function truncateAtMessageBoundary(content: string, maxChars: number): string {
+  if (content.length <= maxChars) {
+    return content;
+  }
+  // Messages are separated by double newlines and start with [role]:
+  const truncated = content.slice(0, maxChars);
+  const lastBoundary = truncated.lastIndexOf("\n\n[");
+  if (lastBoundary > 0) {
+    return truncated.slice(0, lastBoundary);
+  }
+  return truncated;
+}
+
+/**
  * Read existing OBSERVATIONS.md content from workspace.
  */
 async function readExistingObservations(workspaceDir: string): Promise<string> {
@@ -123,11 +167,39 @@ async function readExistingObservations(workspaceDir: string): Promise<string> {
 }
 
 /**
- * Write OBSERVATIONS.md to workspace.
+ * Write OBSERVATIONS.md to workspace atomically (write to temp, then rename).
  */
 async function writeObservations(workspaceDir: string, content: string): Promise<void> {
   const obsPath = path.join(workspaceDir, "OBSERVATIONS.md");
-  await fs.writeFile(obsPath, content, "utf-8");
+  const tmpPath = obsPath + ".tmp";
+  await fs.writeFile(tmpPath, content, "utf-8");
+  await fs.rename(tmpPath, obsPath);
+}
+
+/**
+ * Validate observer output before writing. Returns true if the output looks sane.
+ */
+function validateObserverOutput(
+  newContent: string,
+  existingContent: string,
+): { valid: boolean; reason?: string } {
+  // New content should not be empty
+  if (!newContent.trim()) {
+    return { valid: false, reason: "empty output" };
+  }
+
+  // If existing content was substantial, new content should not be drastically shorter
+  if (
+    existingContent.length > 200 &&
+    newContent.length < existingContent.length * MIN_CONTENT_RATIO
+  ) {
+    return {
+      valid: false,
+      reason: `output too short (${newContent.length} chars vs existing ${existingContent.length} chars, ratio ${(newContent.length / existingContent.length).toFixed(2)} < ${MIN_CONTENT_RATIO})`,
+    };
+  }
+
+  return { valid: true };
 }
 
 /**
@@ -228,21 +300,24 @@ const observationalMemoryHandler: HookHandler = async (event) => {
   }
 
   // Turn counter gating — only run every N turns
-  const currentCount = (turnCounters.get(sessionKey) ?? 0) + 1;
-  turnCounters.set(sessionKey, currentCount);
+  const now = Date.now();
+  const entry = turnCounters.get(sessionKey);
+  const currentCount = (entry?.count ?? 0) + 1;
+  turnCounters.set(sessionKey, { count: currentCount, lastSeen: now });
+  evictStaleCounters();
 
   if (currentCount % observerConfig.triggerEveryNTurns !== 0) {
     log.debug(`Turn ${currentCount}, skipping (runs every ${observerConfig.triggerEveryNTurns})`);
     return;
   }
 
-  // Prevent concurrent observer runs for the same session
-  if (activeSessions.has(sessionKey)) {
-    log.debug("Observer already running for this session, skipping");
+  // Prevent concurrent observer runs for the same workspace (not just session)
+  if (activeWorkspaces.has(workspaceDir)) {
+    log.debug("Observer already running for this workspace, skipping");
     return;
   }
 
-  activeSessions.add(sessionKey);
+  activeWorkspaces.add(workspaceDir);
   try {
     await runObserverCycle({
       cfg,
@@ -253,7 +328,7 @@ const observationalMemoryHandler: HookHandler = async (event) => {
       context,
     });
   } finally {
-    activeSessions.delete(sessionKey);
+    activeWorkspaces.delete(workspaceDir);
   }
 };
 
@@ -288,11 +363,12 @@ async function runObserverCycle(params: {
   const observerProvider = omConfig?.provider;
   const observerModel = omConfig?.model;
 
-  // Build observer prompt
+  // Build observer prompt — truncate at message boundary to avoid cutting mid-message
+  const truncatedContent = truncateAtMessageBoundary(sessionContent, MAX_SESSION_CONTENT_CHARS);
   const userPrompt = OBSERVER_USER_PROMPT_TEMPLATE.replace(
     "{{EXISTING_OBSERVATIONS}}",
     existingObservations || "(none yet)",
-  ).replace("{{RECENT_MESSAGES}}", sessionContent.slice(0, 8000));
+  ).replace("{{RECENT_MESSAGES}}", truncatedContent);
 
   // Run observer
   const newObservations = await runOneOffLLMCall({
@@ -312,7 +388,14 @@ async function runObserverCycle(params: {
     return;
   }
 
-  // Write updated observations
+  // Validate observer output before overwriting
+  const validation = validateObserverOutput(newObservations, existingObservations);
+  if (!validation.valid) {
+    log.warn(`Observer output rejected: ${validation.reason}`);
+    return;
+  }
+
+  // Write updated observations (atomic: write to .tmp then rename)
   await writeObservations(workspaceDir, newObservations);
   log.info("Observations updated", {
     chars: newObservations.length,
@@ -346,11 +429,26 @@ async function runObserverCycle(params: {
     });
 
     if (consolidated) {
+      // Validate reflector output too
+      const reflectorValidation = validateObserverOutput(consolidated, newObservations);
+      if (!reflectorValidation.valid) {
+        log.warn(`Reflector output rejected: ${reflectorValidation.reason}`);
+        return;
+      }
+
       await writeObservations(workspaceDir, consolidated);
       log.info("Observations consolidated by reflector", {
         beforeChars: newObservations.length,
         afterChars: consolidated.length,
       });
+
+      // Warn if reflector failed to meet the target size
+      if (consolidated.length > observerConfig.maxObservationsChars) {
+        log.warn("Reflector output still exceeds maxObservationsChars", {
+          chars: consolidated.length,
+          max: observerConfig.maxObservationsChars,
+        });
+      }
     }
   }
 }
