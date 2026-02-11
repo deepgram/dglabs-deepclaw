@@ -3,6 +3,7 @@ import type { AppViewState } from "./app-view-state.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
+import { DEFAULT_CRON_FORM } from "./app-defaults.ts";
 import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
@@ -24,6 +25,8 @@ import {
   runCronJob,
   removeCronJob,
   addCronJob,
+  updateCronJob,
+  cronJobToForm,
 } from "./controllers/cron.ts";
 import { loadDebug, callDebugMethod } from "./controllers/debug.ts";
 import {
@@ -596,9 +599,37 @@ export function renderApp(state: AppViewState) {
                 channelMeta: state.channelsSnapshot?.channelMeta ?? [],
                 runsJobId: state.cronRunsJobId,
                 runs: state.cronRuns,
+                editingJobId: state.cronEditingJobId,
+                formOpen: state.cronFormOpen,
                 onFormChange: (patch) => (state.cronForm = { ...state.cronForm, ...patch }),
                 onRefresh: () => state.loadCron(),
-                onAdd: () => addCronJob(state),
+                onNewJob: () => {
+                  state.cronEditingJobId = null;
+                  state.cronForm = { ...DEFAULT_CRON_FORM };
+                  state.cronFormOpen = true;
+                },
+                onAdd: async () => {
+                  await addCronJob(state);
+                  if (!state.cronError) {
+                    state.cronFormOpen = false;
+                  }
+                },
+                onSave: async () => {
+                  await updateCronJob(state);
+                  if (!state.cronError) {
+                    state.cronFormOpen = false;
+                  }
+                },
+                onEdit: (job) => {
+                  state.cronEditingJobId = job.id;
+                  state.cronForm = cronJobToForm(job);
+                  state.cronFormOpen = true;
+                },
+                onCancelEdit: () => {
+                  state.cronEditingJobId = null;
+                  state.cronForm = { ...DEFAULT_CRON_FORM };
+                  state.cronFormOpen = false;
+                },
                 onToggle: (job, enabled) => toggleCronJob(state, job, enabled),
                 onRun: (job) => runCronJob(state, job),
                 onRemove: (job) => removeCronJob(state, job),
