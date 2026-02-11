@@ -434,7 +434,7 @@ export class DeepgramMediaBridge {
       } else if (callerContextLines.length === 0) {
         // First call — establish it's a fresh setup, kick off mutual introductions
         call.metadata.initialMessage =
-          "Hey! This is a fresh DeepClaw setup, so we're just getting to know each other. What should I call you?";
+          "Hey! This is a fresh DeepClaw setup, so we're just getting to know each other. What's your name?";
       }
     }
 
@@ -472,8 +472,9 @@ export class DeepgramMediaBridge {
       promptLines.push(
         `This is a brand new setup — you've never spoken with this caller before.`,
         `Introduce yourself as ${nameLabel}. Be warm and confident, not robotic.`,
-        `Within the first exchange, naturally ask what they'd like you to call them.`,
-        `Give a brief taste of what you can do — answer questions, help think through problems, look things up, set reminders, make calls. Keep it to one or two examples, don't list everything.`,
+        `Within the first exchange, naturally ask their name if you don't have it yet.`,
+        `IMPORTANT: When someone says "call me [name]" or "you can call me [name]", they are telling you their NAME — they want to be addressed as that name. This is NOT a request to make a phone call. Respond by confirming the name, e.g. "Got it, [name]."`,
+        `Give a brief taste of what you can do — answer questions, help think through problems, look things up. Keep it to one or two examples, don't list everything.`,
         `If you don't have a name yet (IDENTITY.md is blank), pick one that feels right and tell them. Own it.`,
         `The goal is: by the end of this call, you know each other's names and the caller has a feel for what you're about.`,
       );
