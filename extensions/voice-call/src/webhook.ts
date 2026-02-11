@@ -446,10 +446,10 @@ export class VoiceCallWebhookServer {
       return;
     }
 
-    // Check path
-    if (!url.pathname.startsWith(webhookPath)) {
-      res.statusCode = 404;
-      res.end("Not Found");
+    // Proxy non-voice webhook paths (e.g. /text/webhook) to the gateway HTTP server
+    if (!url.pathname.startsWith(webhookPath) && url.pathname !== webhookPath) {
+      console.log(`[voice-call] proxying ${req.method} ${url.pathname} to gateway`);
+      await this.proxyToGateway(req, res);
       return;
     }
 
@@ -812,6 +812,67 @@ export class VoiceCallWebhookServer {
           /* response may already be closed */
         }
         res.end();
+      }
+    }
+  }
+
+  /**
+   * Proxy non-voice HTTP requests to the gateway HTTP server.
+   * Used for channel webhooks (e.g. /text/webhook for Twilio SMS) that arrive
+   * on the voice-call port via ngrok.
+   */
+  private async proxyToGateway(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const gatewayBase =
+      this.gatewayUrl?.replace(/\/v1\/chat\/completions$/, "").replace(/\/$/, "") ||
+      "http://127.0.0.1:18789";
+
+    let body: string;
+    try {
+      body = await this.readBody(req, MAX_WEBHOOK_BODY_BYTES);
+    } catch (err) {
+      if (err instanceof Error && err.message === "PayloadTooLarge") {
+        res.statusCode = 413;
+        res.end("Payload Too Large");
+        return;
+      }
+      throw err;
+    }
+
+    const targetUrl = `${gatewayBase}${req.url}`;
+    console.log(`[voice-call] proxy target: ${targetUrl}`);
+    const forwardHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value && typeof value === "string") {
+        forwardHeaders[key] = value;
+      }
+    }
+    // Ensure the gateway sees the original host/proto for signature verification
+    if (!forwardHeaders["x-forwarded-host"] && req.headers.host) {
+      forwardHeaders["x-forwarded-host"] = req.headers.host;
+    }
+    if (!forwardHeaders["x-forwarded-proto"]) {
+      forwardHeaders["x-forwarded-proto"] = "https";
+    }
+
+    try {
+      const proxyRes = await fetch(targetUrl, {
+        method: req.method ?? "POST",
+        headers: forwardHeaders,
+        body: req.method !== "GET" && req.method !== "HEAD" ? body : undefined,
+      });
+
+      console.log(`[voice-call] proxy response: ${proxyRes.status} for ${req.url}`);
+      res.statusCode = proxyRes.status;
+      for (const [key, value] of proxyRes.headers.entries()) {
+        res.setHeader(key, value);
+      }
+      const responseBody = await proxyRes.text();
+      res.end(responseBody);
+    } catch (err) {
+      console.error("[voice-call] Gateway webhook proxy error:", err);
+      if (!res.headersSent) {
+        res.statusCode = 502;
+        res.end("Bad Gateway");
       }
     }
   }

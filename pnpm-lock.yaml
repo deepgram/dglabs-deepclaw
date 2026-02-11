@@ -486,6 +486,12 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  extensions/telnyx-sms:
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
   extensions/tlon:
     dependencies:
       '@urbit/aura':
@@ -494,6 +500,12 @@ importers:
       '@urbit/http-api':
         specifier: ^3.0.0
         version: 3.0.0
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
+  extensions/twilio-sms:
     devDependencies:
       openclaw:
         specifier: workspace:*
