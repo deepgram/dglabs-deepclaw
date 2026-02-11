@@ -134,6 +134,15 @@ export type AgentDefaultsConfig = {
   compaction?: AgentCompactionConfig;
   /** Vector memory search configuration (per-agent overrides supported). */
   memorySearch?: MemorySearchConfig;
+  /** Observational memory configuration (observer/reflector models). */
+  observationalMemory?: {
+    /** Enable observational memory (default: true when hook is enabled). */
+    enabled?: boolean;
+    /** Model for observer/reflector (e.g., "gemini-2.0-flash"). */
+    model?: string;
+    /** Provider override for observer (e.g., "google"). */
+    provider?: string;
+  };
   /** Default thinking level when no /think directive is present. */
   thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Default verbose level when no /verbose directive is present. */
