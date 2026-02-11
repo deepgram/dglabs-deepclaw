@@ -515,19 +515,24 @@ export class DeepgramMediaBridge {
 
     // Per-call session key — each call gets a fresh session.
     // Agent identity persists via workspace files (SOUL.md, IDENTITY.md), not session history.
+    const llmEndpointUrl = `${this.config.publicUrl}/v1/chat/completions`;
+    const llmHeaders: Record<string, string> = {
+      Authorization: `Bearer ${this.config.gatewayToken}`,
+      "x-openclaw-session-key": `agent:${agentId}:voice:${callSid}`,
+      "x-openclaw-agent-id": agentId,
+      ...(process.env.FLY_MACHINE_ID && {
+        "fly-force-instance-id": process.env.FLY_MACHINE_ID,
+      }),
+    };
+    console.log(
+      `[DeepgramBridge] LLM endpoint config: url=${llmEndpointUrl} publicUrl=${this.config.publicUrl} gatewayToken=${this.config.gatewayToken ? this.config.gatewayToken.substring(0, 8) + "..." : "(empty)"} sessionKey=agent:${agentId}:voice:${callSid} flyMachineId=${process.env.FLY_MACHINE_ID ?? "(unset)"}`,
+    );
     return {
       systemPrompt,
       llmProvider: "open_ai",
       llmEndpoint: {
-        url: `${this.config.publicUrl}/v1/chat/completions`,
-        headers: {
-          Authorization: `Bearer ${this.config.gatewayToken}`,
-          "x-openclaw-session-key": `agent:${agentId}:voice:${callSid}`,
-          "x-openclaw-agent-id": agentId,
-          ...(process.env.FLY_MACHINE_ID && {
-            "fly-force-instance-id": process.env.FLY_MACHINE_ID,
-          }),
-        },
+        url: llmEndpointUrl,
+        headers: llmHeaders,
       },
     };
   }
