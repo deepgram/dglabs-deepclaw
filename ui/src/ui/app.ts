@@ -323,6 +323,8 @@ export class OpenClawApp extends LitElement {
   @state() cronRunsJobId: string | null = null;
   @state() cronRuns: CronRunLogEntry[] = [];
   @state() cronBusy = false;
+  @state() cronEditingJobId: string | null = null;
+  @state() cronFormOpen = false;
 
   @state() skillsLoading = false;
   @state() skillsReport: SkillStatusReport | null = null;

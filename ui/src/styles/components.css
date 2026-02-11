@@ -899,7 +899,8 @@
   grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
   grid-template-areas:
     "main meta"
-    "footer footer";
+    "footer footer"
+    "runs runs";
   row-gap: 10px;
 }
 
@@ -1013,6 +1014,140 @@
   flex: 0 0 auto;
 }
 
+/* ── Cron status bar (Step 3) ── */
+
+.cron-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+}
+
+.cron-status-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.cron-status-bar__sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.cron-status-bar__spacer {
+  flex: 1;
+}
+
+.cron-status-bar .chip {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* ── Cron form advanced (Step 4) ── */
+
+.cron-form-advanced {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.cron-form-advanced__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  list-style: none;
+}
+
+.cron-form-advanced__header::-webkit-details-marker {
+  display: none;
+}
+
+.cron-form-advanced__header::marker {
+  content: "";
+}
+
+.cron-form-advanced__chevron {
+  font-size: 11px;
+  transition: transform var(--duration-fast) ease;
+  display: inline-block;
+}
+
+.cron-form-advanced[open] .cron-form-advanced__chevron {
+  transform: rotate(90deg);
+}
+
+.cron-form-advanced__content {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+/* ── Cron job editing highlight (Step 6) ── */
+
+.cron-job-editing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* ── Cron inline run history (Step 6) ── */
+
+.cron-job-runs {
+  grid-area: runs;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.cron-job-runs details {
+  border: none;
+}
+
+.cron-job-runs__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  list-style: none;
+}
+
+.cron-job-runs__header::-webkit-details-marker {
+  display: none;
+}
+
+.cron-job-runs__header::marker {
+  content: "";
+}
+
+.cron-job-runs__chevron {
+  font-size: 11px;
+  transition: transform var(--duration-fast) ease;
+  display: inline-block;
+}
+
+.cron-job-runs details[open] .cron-job-runs__chevron {
+  transform: rotate(90deg);
+}
+
+.cron-job-runs__content {
+  padding-top: 10px;
+}
+
 @container (max-width: 560px) {
   .list-item {
     grid-template-columns: 1fr;
@@ -1032,7 +1167,8 @@
     grid-template-areas:
       "main"
       "meta"
-      "footer";
+      "footer"
+      "runs";
   }
 
   .cron-job-footer {
