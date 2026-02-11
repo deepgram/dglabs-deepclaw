@@ -33,5 +33,7 @@ echo ""
 echo "==> Image pushed to registry.fly.io/$FLY_APP"
 echo ""
 echo "Next step — update the control plane secret with the new tag:"
+fly releases -a $FLY_APP --image
+fly secrets set OPENCLAW_IMAGE="registry.fly.io/$FLY_APP:<tag>" -a deepclaw-control
 echo "  fly releases -a $FLY_APP --image"
 echo "  fly secrets set OPENCLAW_IMAGE=\"registry.fly.io/$FLY_APP:<tag>\" -a deepclaw-control"
