@@ -1,10 +1,14 @@
-tag=$(git describe --always)
+set -e
+
+tag="deployment-"$(git describe --always)
 IMAGE="registry.fly.io/deepclaw-instance:$tag"
 
-echo "Building $IMAGE"
-docker build -t $IMAGE -f Dockerfile.fly .
-echo "Pushing $IMAGE"
-docker push $IMAGE
+#echo "Building $IMAGE"
+#docker build -t "$IMAGE" -f Dockerfile.fly .
+#echo "Pushing $IMAGE"
+#docker push "$IMAGE"
+fly deploy . --buildkit -a deepclaw-instance --config fly.deepclaw.toml --image-label $tag --ha false
+
 
 echo "\n $IMAGE \n"
 

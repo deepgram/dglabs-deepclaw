@@ -17,10 +17,10 @@ min_machines_running = 0
 
 [[services.ports]]
 handlers = ["tls", "http"]
-port = 8000
+port = 443
 
 [env]
-PUBLIC_URL = "https://deepclaw-instance.fly.dev:8000"
+PUBLIC_URL = "https://deepclaw-instance.fly.dev"
 
 [vm]
 size = "shared-cpu-2x"

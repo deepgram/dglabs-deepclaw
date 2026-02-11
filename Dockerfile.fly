@@ -20,22 +20,22 @@ COPY scripts ./scripts
 
 RUN pnpm install --frozen-lockfile
 
-# --- Layer 2: Build config + UI (cached until UI or build config changes) ---
+# --- Layer 2: Build config + source (granular copies for better caching) ---
 COPY tsconfig.json tsconfig.plugin-sdk.dts.json tsdown.config.ts ./
-COPY ui ./ui
-ENV OPENCLAW_PREFER_PNPM=1
-RUN pnpm ui:build
-
-# --- Layer 3: Source code (most frequently changed) ---
 COPY openclaw.mjs ./
 COPY src ./src
 COPY packages ./packages
-COPY extensions ./extensions
+COPY ui ./ui
 COPY skills ./skills
 COPY docs ./docs
 COPY CHANGELOG.md LICENSE ./
 
+# --- Layer 3: Extensions (most frequently changed during development) ---
+COPY extensions ./extensions
+
+ENV OPENCLAW_PREFER_PNPM=1
 RUN OPENCLAW_A2UI_SKIP_MISSING=1 pnpm build
+RUN pnpm ui:build
 
 # --- Runtime stage ---
 FROM node:22-slim
