@@ -1,0 +1,8 @@
+# DeepClaw instance deployment config.
+# Usage: fly deploy . -a deepclaw-instance --config fly.deepclaw.toml
+
+app = "deepclaw-instance"
+primary_region = "sjc"
+
+[build]
+dockerfile = "Dockerfile.fly"
