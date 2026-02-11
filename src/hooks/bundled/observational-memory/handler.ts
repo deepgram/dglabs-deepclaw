@@ -141,7 +141,7 @@ async function getRecentSessionMessages(
 /**
  * Truncate session content at the last complete message boundary before maxChars.
  */
-function truncateAtMessageBoundary(content: string, maxChars: number): string {
+export function truncateAtMessageBoundary(content: string, maxChars: number): string {
   if (content.length <= maxChars) {
     return content;
   }
@@ -179,7 +179,7 @@ async function writeObservations(workspaceDir: string, content: string): Promise
 /**
  * Validate observer output before writing. Returns true if the output looks sane.
  */
-function validateObserverOutput(
+export function validateObserverOutput(
   newContent: string,
   existingContent: string,
 ): { valid: boolean; reason?: string } {
