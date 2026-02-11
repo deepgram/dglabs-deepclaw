@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { CallMode } from "../config.js";
+import type { DeepgramVoiceAgentClient } from "../providers/deepgram-voice-agent.js";
 import type { CallManagerContext } from "./context.js";
 import { resolveNumberForAgent } from "../config.js";
 import {
@@ -31,6 +32,9 @@ export async function initiateCall(
   const initialMessage = opts.message;
   const mode = opts.mode ?? ctx.config.outbound.defaultMode;
   const agentId = opts.agentId;
+  console.log(
+    `[voice-call] Outbound call: mode=${mode}, provider=${ctx.config.provider}, to=${to}`,
+  );
 
   if (!ctx.provider) {
     return { callId: "", success: false, error: "Provider not initialized" };
@@ -40,10 +44,23 @@ export async function initiateCall(
   }
 
   if (ctx.activeCalls.size >= ctx.config.maxConcurrentCalls) {
+    const now = Date.now();
+    const summary = Array.from(ctx.activeCalls.values())
+      .slice()
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .slice(0, 3)
+      .map((c) => {
+        const ageSec = Math.max(0, Math.round((now - c.startedAt) / 1000));
+        const provider = c.providerCallId ? ` providerCallId=${c.providerCallId}` : "";
+        return `${c.callId} state=${c.state} ageSec=${ageSec}${provider}`;
+      })
+      .join("; ");
     return {
       callId: "",
       success: false,
-      error: `Maximum concurrent calls (${ctx.config.maxConcurrentCalls}) reached`,
+      error: `Maximum concurrent calls (${ctx.config.maxConcurrentCalls}) reached${
+        summary ? ` (active: ${summary})` : ""
+      }`,
     };
   }
 
@@ -81,8 +98,14 @@ export async function initiateCall(
 
   try {
     // For notify mode with a message, use inline TwiML with <Say>.
+    // Skip inline TwiML for Deepgram — let the stream path handle voice.
     let inlineTwiml: string | undefined;
-    if (mode === "notify" && initialMessage) {
+    if (mode === "notify" && initialMessage && ctx.config.provider === "deepgram") {
+      console.log(
+        `[voice-call] Notify mode via Deepgram stream path (callId: ${callId}, messageChars: ${initialMessage.length})`,
+      );
+    }
+    if (mode === "notify" && initialMessage && ctx.config.provider !== "deepgram") {
       const pollyVoice = mapVoiceToPolly(ctx.config.tts?.openai?.voice);
       inlineTwiml = generateNotifyTwiml(initialMessage, pollyVoice);
       console.log(`[voice-call] Using inline TwiML for notify mode (voice: ${pollyVoice})`);
@@ -238,6 +261,70 @@ export async function continueCall(
   } finally {
     clearTranscriptWaiter(ctx, callId);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Agent Handoff
+// ---------------------------------------------------------------------------
+
+export type HandoffParams = {
+  /** Target agent's system prompt (from IDENTITY.md voice/vibe fields). */
+  systemPrompt: string;
+  /** Optional greeting to speak when the new agent takes over. */
+  greeting?: string;
+  /** Optional TTS model to switch to (e.g. different voice persona). */
+  ttsModel?: string;
+  /** Brief context summary for the new agent. */
+  contextSummary?: string;
+};
+
+/**
+ * Hand off an active call to another agent by updating the Deepgram
+ * Voice Agent's system prompt and optionally switching the TTS voice.
+ *
+ * The call stays connected — only the agent personality changes.
+ * If a greeting is provided, it is injected as an agent message so
+ * the new agent introduces itself to the caller.
+ */
+export function handoffCall(
+  ctx: CallManagerContext,
+  callId: CallId,
+  client: DeepgramVoiceAgentClient,
+  params: HandoffParams,
+): { success: boolean; error?: string } {
+  const call = ctx.activeCalls.get(callId);
+  if (!call) {
+    return { success: false, error: "Call not found" };
+  }
+  if (TerminalStates.has(call.state)) {
+    return { success: false, error: "Call has ended" };
+  }
+  if (!client.isConnected()) {
+    return { success: false, error: "Voice agent not connected" };
+  }
+
+  // Build the new prompt, injecting context summary if provided.
+  const prompt = params.contextSummary
+    ? `${params.systemPrompt}\n\nContext from previous agent:\n${params.contextSummary}`
+    : params.systemPrompt;
+
+  // Update system prompt (switches the agent personality mid-call).
+  client.updatePrompt(prompt);
+
+  // Optionally switch TTS voice model.
+  if (params.ttsModel) {
+    client.updateSpeak(params.ttsModel);
+  }
+
+  // Speak greeting from the new agent so the caller hears the transition.
+  if (params.greeting) {
+    client.injectAgentMessage(params.greeting);
+    addTranscriptEntry(call, "bot", params.greeting);
+  }
+
+  persistCallRecord(ctx.storePath, call);
+  console.log(`[voice-call] Handoff completed for call ${callId}`);
+  return { success: true };
 }
 
 export async function endCall(

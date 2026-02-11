@@ -10,6 +10,7 @@ import {
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
+  DEFAULT_CALLS_FILENAME,
   DEFAULT_HEARTBEAT_FILENAME,
   DEFAULT_IDENTITY_FILENAME,
   DEFAULT_MEMORY_ALT_FILENAME,
@@ -52,6 +53,7 @@ const BOOTSTRAP_FILE_NAMES = [
   DEFAULT_USER_FILENAME,
   DEFAULT_HEARTBEAT_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
+  DEFAULT_CALLS_FILENAME,
 ] as const;
 
 const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
@@ -78,26 +80,42 @@ async function statFile(filePath: string): Promise<FileMeta | null> {
   }
 }
 
+async function isSymlink(filePath: string): Promise<boolean> {
+  try {
+    const lst = await fs.lstat(filePath);
+    return lst.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 async function listAgentFiles(workspaceDir: string) {
   const files: Array<{
     name: string;
     path: string;
     missing: boolean;
+    inherited?: boolean;
     size?: number;
     updatedAtMs?: number;
   }> = [];
 
   for (const name of BOOTSTRAP_FILE_NAMES) {
     const filePath = path.join(workspaceDir, name);
+    const symlink = await isSymlink(filePath);
     const meta = await statFile(filePath);
     if (meta) {
       files.push({
         name,
         path: filePath,
         missing: false,
+        inherited: symlink,
         size: meta.size,
         updatedAtMs: meta.updatedAtMs,
       });
+    } else if (symlink) {
+      // Symlink exists but target is unresolvable (e.g. absolute host path inside Docker).
+      // Still mark as inherited so the UI doesn't show "missing".
+      files.push({ name, path: filePath, missing: false, inherited: true });
     } else {
       files.push({ name, path: filePath, missing: true });
     }
@@ -252,9 +270,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
         const newUserPath = path.join(workspaceDir, DEFAULT_USER_FILENAME);
         const defaultUserStat = await fs.stat(defaultUserPath).catch(() => null);
         if (defaultUserStat?.isFile()) {
-          // Remove the blank bootstrap USER.md and replace with a symlink.
+          // Remove the blank bootstrap USER.md and replace with a relative symlink.
+          // Relative symlinks work inside Docker where the mount point differs from the host.
+          const relTarget = path.relative(path.dirname(newUserPath), defaultUserPath);
           await fs.unlink(newUserPath).catch(() => {});
-          await fs.symlink(defaultUserPath, newUserPath);
+          await fs.symlink(relTarget, newUserPath);
         }
       }
     } catch {
@@ -448,6 +468,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
     const filePath = path.join(workspaceDir, name);
+    const symlink = await isSymlink(filePath);
     const meta = await statFile(filePath);
     if (!meta) {
       respond(
@@ -455,7 +476,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
         {
           agentId,
           workspace: workspaceDir,
-          file: { name, path: filePath, missing: true },
+          file: { name, path: filePath, missing: !symlink, inherited: symlink },
         },
         undefined,
       );
@@ -471,6 +492,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
           name,
           path: filePath,
           missing: false,
+          inherited: symlink,
           size: meta.size,
           updatedAtMs: meta.updatedAtMs,
           content,

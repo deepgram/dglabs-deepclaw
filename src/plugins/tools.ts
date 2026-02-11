@@ -125,5 +125,9 @@ export function resolvePluginTools(params: {
     }
   }
 
+  if (tools.length > 0) {
+    log.debug(`resolved plugin tools: [${tools.map((t) => t.name).join(", ")}]`);
+  }
+
   return tools;
 }

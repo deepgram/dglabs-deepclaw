@@ -4,9 +4,12 @@ import type {
   SandboxToolPolicyResolved,
   SandboxToolPolicySource,
 } from "./types.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { resolveAgentConfig } from "../agent-scope.js";
 import { expandToolGroups } from "../tool-policy.js";
 import { DEFAULT_TOOL_ALLOW, DEFAULT_TOOL_DENY } from "./constants.js";
+
+const log = createSubsystemLogger("sandbox/tool-policy");
 
 type CompiledPattern =
   | { kind: "all" }
@@ -130,6 +133,10 @@ export function resolveSandboxToolPolicyForAgent(
   ) {
     expandedAllow = [...expandedAllow, "image"];
   }
+
+  log.debug(
+    `[${agentId ?? "default"}] sandbox tool policy resolved: allow=[${expandedAllow.join(",")}] deny=[${expandedDeny.join(",")}] allowSource=${allowSource.source} denySource=${denySource.source}`,
+  );
 
   return {
     allow: expandedAllow,

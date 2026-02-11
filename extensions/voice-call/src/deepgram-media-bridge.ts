@@ -14,15 +14,17 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import { WebSocket, WebSocketServer } from "ws";
 import type { VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { CallManager } from "./manager.js";
 import type { DeepgramVoiceAgentClient } from "./providers/deepgram-voice-agent.js";
 import type { DeepgramProvider, DeepgramSessionOverrides } from "./providers/deepgram.js";
-import type { NormalizedEvent } from "./types.js";
+import type { CallRecord, NormalizedEvent } from "./types.js";
 import { resolveAgentForNumber } from "./config.js";
 import { loadCoreAgentDeps } from "./core-bridge.js";
+import { TerminalStates } from "./types.js";
 
 /**
  * Configuration for the Deepgram media bridge.
@@ -48,6 +50,8 @@ export interface DeepgramMediaBridgeConfig {
   coreConfig?: CoreConfig;
   /** Voice call config for number-to-agent routing */
   voiceCallConfig?: VoiceCallConfig;
+  /** Callback fired after a call ends (fire-and-forget) */
+  onCallEnded?: (callRecord: CallRecord, agentId: string) => void;
 }
 
 /**
@@ -74,6 +78,21 @@ export class DeepgramMediaBridge {
 
   constructor(config: DeepgramMediaBridgeConfig) {
     this.config = config;
+  }
+
+  /**
+   * Inject a filler phrase via the Deepgram agent for a given call.
+   * Uses InjectAgentMessage so the agent speaks immediately (same as greeting).
+   * Returns true if injected, false if no active session found.
+   */
+  injectFiller(callSid: string, phrase: string): boolean {
+    for (const session of this.sessions.values()) {
+      if (session.callId === callSid) {
+        session.client.injectAgentMessage(phrase);
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -265,7 +284,8 @@ export class DeepgramMediaBridge {
       // Notify connection
       this.config.onConnect?.(callSid, streamSid);
 
-      // Speak initial greeting via Deepgram agent (not TwilioProvider.playTts)
+      // Speak initial greeting via Deepgram agent (not TwilioProvider.playTts).
+      // For notify-mode calls, schedule auto-hangup once the agent finishes speaking.
       setTimeout(() => {
         const call = this.config.manager.getCallByProviderCallId(callSid);
         const initialMessage =
@@ -273,9 +293,31 @@ export class DeepgramMediaBridge {
             ? call.metadata.initialMessage.trim()
             : "";
         if (initialMessage && call?.metadata) {
+          const mode = (call.metadata.mode as string) ?? "conversation";
           delete call.metadata.initialMessage;
-          console.log(`[DeepgramBridge] Injecting initial greeting via Deepgram agent`);
+          console.log(
+            `[DeepgramBridge] Injecting initial greeting via Deepgram agent (mode=${mode})`,
+          );
           client.injectAgentMessage(initialMessage);
+
+          // In notify mode, auto-hangup after the agent finishes speaking the message
+          if (mode === "notify") {
+            const delaySec = this.config.voiceCallConfig?.outbound.notifyHangupDelaySec ?? 3;
+            client.once("agentAudioDone", () => {
+              console.log(
+                `[DeepgramBridge] Notify mode: agent audio done, scheduling hangup in ${delaySec}s`,
+              );
+              setTimeout(async () => {
+                const currentCall = this.config.manager.getCallByProviderCallId(callSid);
+                if (currentCall && !TerminalStates.has(currentCall.state)) {
+                  console.log(
+                    `[DeepgramBridge] Notify mode: hanging up call ${currentCall.callId}`,
+                  );
+                  await this.config.manager.endCall(currentCall.callId);
+                }
+              }, delaySec * 1000);
+            });
+          }
         }
       }, 500);
 
@@ -327,6 +369,51 @@ export class DeepgramMediaBridge {
       `[DeepgramBridge] Resolved agent: id=${agentId} name=${agentName} calledNumber=${calledNumber}`,
     );
 
+    // Load caller context from workspace files (USER.md, CALLS.md)
+    let callerContext = "";
+    let callerName: string | undefined;
+    try {
+      if (this.config.coreConfig) {
+        const deps = await loadCoreAgentDeps();
+        const workspaceDir = deps.resolveAgentWorkspaceDir(this.config.coreConfig, agentId);
+        const userMdPath = `${workspaceDir}/USER.md`;
+        try {
+          const userMd = await fs.readFile(userMdPath, "utf-8");
+          const nameMatch = userMd.match(/\*\*Name:\*\*\s*(.+)/);
+          callerName = nameMatch?.[1]?.trim() || undefined;
+          if (callerName) {
+            callerContext += `The caller's name is ${callerName}. Greet them by name.\n`;
+          }
+        } catch {
+          // USER.md not found or unreadable — skip
+        }
+        const callsMdPath = `${workspaceDir}/CALLS.md`;
+        try {
+          const callsMd = await fs.readFile(callsMdPath, "utf-8");
+          if (callsMd.includes("###")) {
+            callerContext += `You have previous call history with this caller. You can reference it naturally.\n`;
+          }
+        } catch {
+          // CALLS.md not found — skip
+        }
+      }
+    } catch (err) {
+      console.warn("[DeepgramBridge] Failed to load caller context:", err);
+    }
+
+    // Personalize the initial greeting if we know the caller's name
+    if (callerName && call?.metadata?.initialMessage) {
+      const greetings = [
+        `Hey ${callerName}! What's going on?`,
+        `${callerName}, hey! What can I do for you?`,
+        `Hey ${callerName}, good to hear from you. What's up?`,
+        `${callerName}! What's on your mind?`,
+        `Hey there ${callerName}. How can I help?`,
+        `${callerName}, what's up?`,
+      ];
+      call.metadata.initialMessage = greetings[Math.floor(Math.random() * greetings.length)];
+    }
+
     // Build system prompt with voice-specific behavioral instructions only.
     // Agent identity comes from workspace files (SOUL.md, IDENTITY.md, BOOTSTRAP.md)
     // loaded by the Pi agent's normal startup path.
@@ -344,14 +431,18 @@ export class DeepgramMediaBridge {
       timeZoneName: "short",
     });
 
-    const systemPrompt = [
+    const promptLines = [
       `You are on a phone call. Keep responses brief and conversational (1-2 sentences max).`,
       `Speak naturally as if in a real phone conversation.`,
       `IMPORTANT: Your responses will be spoken aloud via text-to-speech. Do NOT use any text formatting — no markdown, no bullet points, no asterisks, no numbered lists, no headers. Write plain conversational sentences only.`,
-      `When you need to use a tool or look something up, ALWAYS say a brief acknowledgment first (e.g. "Let me check that for you" or "One moment") so the caller isn't waiting in silence.`,
+      `Do NOT start your response with filler phrases like "Let me check" or "One moment" — that is handled automatically. Jump straight into the answer.`,
       `Today is ${localTime}. Always present times in this timezone.`,
       `The caller's phone number is ${callerNumber}.`,
-    ].join("\n");
+    ];
+    if (callerContext) {
+      promptLines.push(callerContext.trim());
+    }
+    const systemPrompt = promptLines.join("\n");
 
     // Per-call session key — each call gets a fresh session.
     // Agent identity persists via workspace files (SOUL.md, IDENTITY.md), not session history.
@@ -374,9 +465,48 @@ export class DeepgramMediaBridge {
    */
   private handleStop(session: BridgeSession): void {
     console.log(`[DeepgramBridge] Stream stopped: ${session.streamSid}`);
+    const callRecord = this.config.manager.getCallByProviderCallId(session.callId);
+
+    // Best-effort: mark the call as ended even if Twilio status callbacks are missed.
+    // This prevents stale non-terminal call records from blocking new calls after restart.
+    try {
+      const endedEvent: NormalizedEvent = {
+        id: `dg-bridge-ended-${crypto.randomUUID()}`,
+        type: "call.ended",
+        callId: callRecord?.callId ?? session.callId,
+        providerCallId: session.callId,
+        timestamp: Date.now(),
+        reason: "completed",
+        direction: callRecord?.direction,
+        from: callRecord?.from,
+        to: callRecord?.to,
+      };
+      this.config.manager.processEvent(endedEvent);
+    } catch (err) {
+      console.warn(
+        `[DeepgramBridge] Failed to mark call ended for ${session.callId}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+
     this.config.deepgramProvider.closeSession(session.callId);
     this.sessions.delete(session.streamSid);
     this.config.onDisconnect?.(session.callId);
+
+    // Fire post-call callback (fire-and-forget)
+    if (this.config.onCallEnded) {
+      if (callRecord) {
+        const calledNumber = callRecord.direction === "inbound" ? callRecord.to : callRecord.from;
+        const agentId = this.config.voiceCallConfig
+          ? resolveAgentForNumber(this.config.voiceCallConfig, calledNumber, "inbound")
+          : "main";
+        try {
+          this.config.onCallEnded(callRecord, agentId);
+        } catch (err) {
+          console.error(`[DeepgramBridge] onCallEnded callback error:`, err);
+        }
+      }
+    }
   }
 
   private getStreamToken(request: IncomingMessage): string | undefined {

@@ -354,6 +354,7 @@ export type AgentFileEntry = {
   name: string;
   path: string;
   missing: boolean;
+  inherited?: boolean;
   size?: number;
   updatedAtMs?: number;
   content?: string;

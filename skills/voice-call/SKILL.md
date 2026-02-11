@@ -39,6 +39,12 @@ Notes:
 
 - Requires the voice-call plugin to be enabled.
 - Plugin config lives under `plugins.entries.voice-call.config`.
+- If you need to know the configured numbers (e.g. your default callee), prefer reading config via the `gateway` tool:
+  - Run `gateway` with `action: "config.get"` and inspect:
+    - `plugins.entries.voice-call.config.fromNumber` (caller ID / Twilio number)
+    - `plugins.entries.voice-call.config.toNumber` (default callee for outbound calls)
+    - `plugins.entries.voice-call.config.numbers` (inbound routing by called number)
+  - This is more reliable than file reads because `read`/`exec` may run in a sandbox.
 - Twilio config: `provider: "twilio"` + `twilio.accountSid/authToken` + `fromNumber`.
 - Telnyx config: `provider: "telnyx"` + `telnyx.apiKey/connectionId` + `fromNumber`.
 - Plivo config: `provider: "plivo"` + `plivo.authId/authToken` + `fromNumber`.
