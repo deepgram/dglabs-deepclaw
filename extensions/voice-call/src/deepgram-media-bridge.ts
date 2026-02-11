@@ -204,6 +204,11 @@ export class DeepgramMediaBridge {
     }
 
     try {
+      // Ensure a call record exists — streams may arrive without a prior webhook
+      // POST (e.g., when a control plane proxy handles Twilio and forwards the
+      // media stream directly). This creates the record with a default greeting.
+      this.config.manager.ensureCallForStream(callSid);
+
       // Build per-call overrides for gateway integration
       const overrides = await this.buildSessionOverrides(callSid, message);
       const client = await this.config.deepgramProvider.createSession(callSid, callSid, overrides);
