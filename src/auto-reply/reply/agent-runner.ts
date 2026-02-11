@@ -18,6 +18,7 @@ import {
   updateSessionStore,
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
+import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
 import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import { defaultRuntime } from "../../runtime.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
@@ -511,6 +512,23 @@ export async function runReplyAgent(params: {
     }
     if (responseUsageLine) {
       finalPayloads = appendUsageLine(finalPayloads, responseUsageLine);
+    }
+
+    // Fire observational memory hook (non-blocking, never delays response)
+    if (sessionKey) {
+      const turnCompleteEvent = createInternalHookEvent("agent", "turn-complete", sessionKey, {
+        cfg,
+        sessionFile: followupRun.run.sessionFile,
+        sessionId: followupRun.run.sessionId,
+        agentId: followupRun.run.agentId,
+        workspaceDir: followupRun.run.workspaceDir,
+        agentDir: followupRun.run.agentDir,
+        provider: providerUsed,
+        model: modelUsed,
+      });
+      void triggerInternalHook(turnCompleteEvent).catch(() => {
+        // Swallow errors — observational memory should never break the main flow
+      });
     }
 
     return finalizeWithFollowup(
