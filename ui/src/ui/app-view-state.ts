@@ -10,6 +10,7 @@ import type { UiSettings } from "./storage.ts";
 import type { ThemeTransitionContext } from "./theme-transition.ts";
 import type { ThemeMode } from "./theme.ts";
 import type {
+  ActiveCallEntry,
   AgentsListResult,
   AgentsFilesListResult,
   AgentIdentityResult,
@@ -71,6 +72,8 @@ export type AppViewState = {
   chatThinkingLevel: string | null;
   chatQueue: ChatQueueItem[];
   chatManualRefreshInFlight: boolean;
+  activeCallCount: number;
+  activeCalls: ActiveCallEntry[];
   nodesLoading: boolean;
   nodes: Array<Record<string, unknown>>;
   chatNewMessagesBelow: boolean;
@@ -152,6 +155,7 @@ export type AppViewState = {
   agentSkillsAgentId: string | null;
   agentModelCatalog: ModelCatalogEntry[];
   agentModelCatalogLoading: boolean;
+  agentModelEditing: boolean;
   identityDraftName: string | null;
   identityDraftEmoji: string | null;
   identitySaving: boolean;
@@ -207,6 +211,8 @@ export type AppViewState = {
   cronRunsJobId: string | null;
   cronRuns: CronRunLogEntry[];
   cronBusy: boolean;
+  cronEditingJobId: string | null;
+  cronFormOpen: boolean;
   skillsLoading: boolean;
   skillsReport: SkillStatusReport | null;
   skillsError: string | null;

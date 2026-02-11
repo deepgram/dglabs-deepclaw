@@ -1,6 +1,13 @@
 export { resolveAgentDir, resolveAgentWorkspaceDir } from "./agents/agent-scope.ts";
 
 export { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./agents/defaults.ts";
+export {
+  parseUserMarkdown,
+  userProfileHasValues,
+  mergeUserProfiles,
+  serializeUserMarkdown,
+  loadUserProfileFromWorkspace,
+} from "./agents/user-file.ts";
 export { resolveAgentIdentity } from "./agents/identity.ts";
 export { resolveThinkingDefault } from "./agents/model-selection.ts";
 export { runEmbeddedPiAgent } from "./agents/pi-embedded.ts";

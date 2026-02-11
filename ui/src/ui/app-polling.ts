@@ -1,9 +1,11 @@
 import type { OpenClawApp } from "./app.ts";
+import { loadActiveCalls } from "./controllers/active-calls.ts";
 import { loadDebug } from "./controllers/debug.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
 
 type PollingHost = {
+  activeCallsPollInterval: number | null;
   nodesPollInterval: number | null;
   logsPollInterval: number | null;
   debugPollInterval: number | null;
@@ -66,4 +68,22 @@ export function stopDebugPolling(host: PollingHost) {
   }
   clearInterval(host.debugPollInterval);
   host.debugPollInterval = null;
+}
+
+export function startActiveCallsPolling(host: PollingHost) {
+  if (host.activeCallsPollInterval != null) {
+    return;
+  }
+  host.activeCallsPollInterval = window.setInterval(
+    () => void loadActiveCalls(host as unknown as OpenClawApp),
+    5000,
+  );
+}
+
+export function stopActiveCallsPolling(host: PollingHost) {
+  if (host.activeCallsPollInterval == null) {
+    return;
+  }
+  clearInterval(host.activeCallsPollInterval);
+  host.activeCallsPollInterval = null;
 }

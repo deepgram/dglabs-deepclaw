@@ -17,6 +17,7 @@ services:
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GLEAN_API_KEY: ${GLEAN_API_KEY:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
@@ -29,8 +30,10 @@ services:
     volumes:
       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
-      - ./config/openclaw.json:/home/node/.openclaw/openclaw.json:ro
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${OPENCLAW_SANDBOX_DIR}:${OPENCLAW_SANDBOX_DIR}
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${OPENCLAW_CONFIG_DIR}/docker-cli:/usr/local/bin/docker:ro
+      - ./dist:/app/dist:ro
     ports:
       - "${OPENCLAW_GATEWAY_PORT:-18789}:18789"
       - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"

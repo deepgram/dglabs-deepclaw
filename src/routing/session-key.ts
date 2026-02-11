@@ -4,6 +4,7 @@ import { parseAgentSessionKey, type ParsedAgentSessionKey } from "../sessions/se
 export {
   isAcpSessionKey,
   isSubagentSessionKey,
+  isVoiceSessionKey,
   parseAgentSessionKey,
   type ParsedAgentSessionKey,
 } from "../sessions/session-key-utils.js";

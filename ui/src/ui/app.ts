@@ -213,6 +213,9 @@ export class OpenClawApp extends LitElement {
   @state() nostrProfileFormState: NostrProfileFormState | null = null;
   @state() nostrProfileAccountId: string | null = null;
 
+  @state() activeCallCount: number = 0;
+  @state() activeCalls: import("./types.ts").ActiveCallEntry[] = [];
+
   @state() presenceLoading = false;
   @state() presenceEntries: PresenceEntry[] = [];
   @state() presenceError: string | null = null;
@@ -241,6 +244,7 @@ export class OpenClawApp extends LitElement {
 
   @state() agentModelCatalog: ModelCatalogEntry[] = [];
   @state() agentModelCatalogLoading = false;
+  @state() agentModelEditing = false;
 
   @state() identityDraftName: string | null = null;
   @state() identityDraftEmoji: string | null = null;
@@ -320,6 +324,8 @@ export class OpenClawApp extends LitElement {
   @state() cronRunsJobId: string | null = null;
   @state() cronRuns: CronRunLogEntry[] = [];
   @state() cronBusy = false;
+  @state() cronEditingJobId: string | null = null;
+  @state() cronFormOpen = false;
 
   @state() skillsLoading = false;
   @state() skillsReport: SkillStatusReport | null = null;
@@ -362,6 +368,7 @@ export class OpenClawApp extends LitElement {
   private chatHasAutoScrolled = false;
   private chatUserNearBottom = true;
   @state() chatNewMessagesBelow = false;
+  private activeCallsPollInterval: number | null = null;
   private nodesPollInterval: number | null = null;
   private logsPollInterval: number | null = null;
   private debugPollInterval: number | null = null;
