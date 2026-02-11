@@ -227,7 +227,7 @@ export async function createVoiceCallRuntime(params: {
       manager,
       gatewayUrl,
       gatewayToken,
-      publicUrl: publicOrigin ?? undefined,
+      publicUrl: publicOrigin ?? `http://localhost:${config.serve.port}`,
       coreConfig,
       voiceCallConfig: config,
       // No stream gating — a Twilio proxy handles call auth upstream

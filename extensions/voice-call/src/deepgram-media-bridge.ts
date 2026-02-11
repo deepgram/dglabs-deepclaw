@@ -292,8 +292,12 @@ export class DeepgramMediaBridge {
 
       // Speak initial greeting via Deepgram agent (not TwilioProvider.playTts).
       // For notify-mode calls, schedule auto-hangup once the agent finishes speaking.
+      console.log(`[DeepgramBridge] Scheduling greeting injection in 500ms for call=${callSid}`);
       setTimeout(() => {
         const call = this.config.manager.getCallByProviderCallId(callSid);
+        console.log(
+          `[DeepgramBridge] Greeting timer fired for call=${callSid}: callFound=${!!call} hasMetadata=${!!call?.metadata} initialMessage=${JSON.stringify(call?.metadata?.initialMessage)} callState=${call?.state}`,
+        );
         const initialMessage =
           typeof call?.metadata?.initialMessage === "string"
             ? call.metadata.initialMessage.trim()
@@ -302,7 +306,7 @@ export class DeepgramMediaBridge {
           const mode = (call.metadata.mode as string) ?? "conversation";
           delete call.metadata.initialMessage;
           console.log(
-            `[DeepgramBridge] Injecting initial greeting via Deepgram agent (mode=${mode})`,
+            `[DeepgramBridge] Injecting initial greeting via Deepgram agent (mode=${mode}, length=${initialMessage.length}): "${initialMessage.substring(0, 80)}"`,
           );
           client.injectAgentMessage(initialMessage);
 
@@ -324,6 +328,10 @@ export class DeepgramMediaBridge {
               }, delaySec * 1000);
             });
           }
+        } else {
+          console.log(
+            `[DeepgramBridge] No greeting to inject for call=${callSid}: initialMessage=${JSON.stringify(initialMessage) || "(empty)"} hasMetadata=${!!call?.metadata}`,
+          );
         }
       }, 500);
 
@@ -433,6 +441,9 @@ export class DeepgramMediaBridge {
     }
 
     // Personalize the initial greeting
+    console.log(
+      `[DeepgramBridge] Greeting personalization: callSid=${callSid} hasCall=${!!call} hasMetadata=${!!call?.metadata} initialMessage=${JSON.stringify(call?.metadata?.initialMessage)} callerName=${callerName ?? "(none)"} contextLines=${callerContextLines.length}`,
+    );
     if (call?.metadata?.initialMessage) {
       if (callerName) {
         const greetings = [
@@ -443,12 +454,21 @@ export class DeepgramMediaBridge {
           `Hey there ${callerName}. How can I help?`,
           `${callerName}, what's up?`,
         ];
-        call.metadata.initialMessage = greetings[Math.floor(Math.random() * greetings.length)];
+        const chosen = greetings[Math.floor(Math.random() * greetings.length)];
+        console.log(`[DeepgramBridge] Personalized greeting for ${callerName}: "${chosen}"`);
+        call.metadata.initialMessage = chosen;
       } else if (callerContextLines.length === 0) {
         // First call — establish it's a fresh setup, kick off mutual introductions
         call.metadata.initialMessage =
           "Hey! This is a fresh DeepClaw setup, so we're just getting to know each other. What should I call you?";
+        console.log(`[DeepgramBridge] Using first-call greeting (no caller context)`);
+      } else {
+        console.log(`[DeepgramBridge] Keeping default greeting (has context but no callerName)`);
       }
+    } else {
+      console.log(
+        `[DeepgramBridge] No initialMessage on call metadata — skipping greeting personalization`,
+      );
     }
 
     // Build system prompt with voice-specific behavioral instructions only.
