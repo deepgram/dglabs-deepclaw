@@ -19,6 +19,9 @@ min_machines_running = 0
 handlers = ["tls", "http"]
 port = 8000
 
+[env]
+PUBLIC_URL = "https://deepclaw-instance.fly.dev:8000"
+
 [vm]
 size = "shared-cpu-2x"
 memory = "2048mb"

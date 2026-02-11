@@ -524,6 +524,9 @@ export class DeepgramMediaBridge {
           Authorization: `Bearer ${this.config.gatewayToken}`,
           "x-openclaw-session-key": `agent:${agentId}:voice:${callSid}`,
           "x-openclaw-agent-id": agentId,
+          ...(process.env.FLY_MACHINE_ID && {
+            "fly-force-instance-id": process.env.FLY_MACHINE_ID,
+          }),
         },
       },
     };
