@@ -240,6 +240,9 @@ export async function createVoiceCallRuntime(params: {
         return true;
       },
       onCallEnded: (callRecord, agentId) => {
+        console.log(
+          `[USER.md lifecycle] onCallEnded fired — agentId=${agentId} callId=${callRecord.callId} transcriptEntries=${callRecord.transcript.length}`,
+        );
         void generateCallSummary({
           voiceConfig: config,
           coreConfig,

@@ -377,6 +377,9 @@ export class DeepgramMediaBridge {
       if (this.config.coreConfig) {
         const deps = await loadCoreAgentDeps();
         const workspaceDir = deps.resolveAgentWorkspaceDir(this.config.coreConfig, agentId);
+        console.log(
+          `[USER.md lifecycle] buildSessionOverrides — loading USER.md for agentId=${agentId} workspace=${workspaceDir}`,
+        );
 
         // Parse USER.md with proper parser
         const userMdPath = `${workspaceDir}/USER.md`;
@@ -384,6 +387,9 @@ export class DeepgramMediaBridge {
           const userMd = await fs.readFile(userMdPath, "utf-8");
           const userProfile = parseUserMarkdown(userMd);
           callerName = userProfile.callName || userProfile.name;
+          console.log(
+            `[USER.md lifecycle] READ USER.md at call start — callerName=${callerName ?? "(none)"} notes=${userProfile.notes ? "yes" : "(empty)"} context=${userProfile.context ? "yes" : "(empty)"} raw=${userMd.length} chars`,
+          );
           if (callerName) {
             callerContextLines.push(`The caller's name is ${callerName}. Greet them by name.`);
           }
@@ -394,7 +400,9 @@ export class DeepgramMediaBridge {
             callerContextLines.push(`Context: ${userProfile.context}`);
           }
         } catch {
-          // USER.md not found or unreadable — skip
+          console.log(
+            `[USER.md lifecycle] No USER.md found at ${userMdPath} — first call for this agent`,
+          );
         }
 
         // Parse CALLS.md for rich recent call context
