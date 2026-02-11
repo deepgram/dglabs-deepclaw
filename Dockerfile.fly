@@ -75,7 +75,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
     CMD node /app/openclaw.mjs gateway health --url ws://localhost:18789 --timeout 5000 || exit 1
 
-ENV PUBLIC_URL="https://deepclaw-instance.fly.dev:8000"
+ENV PUBLIC_URL="https://deepclaw-instance.fly.dev"
 
 USER node
 WORKDIR /home/node
