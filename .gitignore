@@ -64,6 +64,7 @@ apps/ios/*.mobileprovision
 
 # Runtime data (workspace, sandboxes, agent state)
 data/
+!data/.gitkeep
 
 # Config dir runtime artifacts (keep only openclaw.json)
 config/*
