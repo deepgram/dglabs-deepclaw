@@ -10,6 +10,7 @@ import type {
   SignalStatus,
   SlackStatus,
   TelegramStatus,
+  VoiceCallStatus,
   WhatsAppStatus,
 } from "../types.ts";
 import type { NostrProfileFormState } from "./channels.nostr-profile-form.ts";
@@ -58,5 +59,6 @@ export type ChannelsChannelData = {
   signal?: SignalStatus | null;
   imessage?: IMessageStatus | null;
   nostr?: NostrStatus | null;
+  voicecall?: VoiceCallStatus | null;
   channelAccounts?: Record<string, ChannelAccountSnapshot[]> | null;
 };

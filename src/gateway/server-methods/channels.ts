@@ -12,6 +12,7 @@ import {
 import { buildChannelAccountSnapshot } from "../../channels/plugins/status.js";
 import { loadConfig, readConfigFileSnapshot } from "../../config/config.js";
 import { getChannelActivity } from "../../infra/channel-activity.js";
+import { requireActivePluginRegistry } from "../../plugins/runtime.js";
 import { DEFAULT_ACCOUNT_ID } from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
 import {
@@ -230,6 +231,46 @@ export const channelsHandlers: GatewayRequestHandlers = {
       channelsMap[plugin.id] = summary;
       accountsMap[plugin.id] = accounts;
       defaultAccountIdMap[plugin.id] = defaultAccountId;
+    }
+
+    // Inject voice-call service plugin into channels payload if registered
+    const pluginRegistry = requireActivePluginRegistry();
+    const vcHandler = pluginRegistry.gatewayHandlers["voicecall.channelStatus"];
+    if (vcHandler) {
+      let vcStatus: Record<string, unknown> | null = null;
+      await vcHandler({
+        req: { method: "voicecall.channelStatus", id: "internal" } as never,
+        params: {},
+        client: null,
+        isWebchatConnect: () => false,
+        respond: (ok, result) => {
+          if (ok && result && typeof result === "object") {
+            vcStatus = result as Record<string, unknown>;
+          }
+        },
+        context,
+      });
+      if (vcStatus) {
+        channelsMap["voicecall"] = vcStatus;
+        accountsMap["voicecall"] = [];
+        defaultAccountIdMap["voicecall"] = DEFAULT_ACCOUNT_ID;
+        const channelOrder = payload.channelOrder as string[];
+        if (!channelOrder.includes("voicecall")) {
+          channelOrder.push("voicecall");
+        }
+        const channelLabels = payload.channelLabels as Record<string, string>;
+        channelLabels["voicecall"] = "Voice Call";
+        const channelMeta = payload.channelMeta as
+          | Array<{ id: string; label: string; detailLabel: string }>
+          | undefined;
+        if (channelMeta && !channelMeta.some((e) => e.id === "voicecall")) {
+          channelMeta.push({
+            id: "voicecall",
+            label: "Voice Call",
+            detailLabel: "Voice Call",
+          });
+        }
+      }
     }
 
     respond(true, payload, undefined);
