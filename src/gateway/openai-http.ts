@@ -208,6 +208,7 @@ export async function handleOpenAiHttpRequest(
   const agentId = resolveAgentIdForRequest({ req, model });
   const sessionKey = resolveOpenAiSessionKey({ req, agentId, user });
   const prompt = buildAgentPrompt(payload.messages);
+
   if (!prompt.message) {
     sendJson(res, 400, {
       error: {
@@ -219,6 +220,10 @@ export async function handleOpenAiHttpRequest(
   }
 
   const runId = `chatcmpl_${randomUUID()}`;
+  const reqStartMs = Date.now();
+  console.log(
+    `[openai-http] ${runId} agent=${agentId} session=${sessionKey} stream=${stream} model=${model} promptLen=${prompt.message.length}`,
+  );
   const deps = createDefaultDeps();
 
   if (!stream) {
@@ -336,6 +341,7 @@ export async function handleOpenAiHttpRequest(
 
   void (async () => {
     try {
+      console.log(`[openai-http] ${runId} agentCommand starting`);
       const result = await agentCommand(
         {
           message: prompt.message,
@@ -348,6 +354,9 @@ export async function handleOpenAiHttpRequest(
         },
         defaultRuntime,
         deps,
+      );
+      console.log(
+        `[openai-http] ${runId} agentCommand done (+${Date.now() - reqStartMs}ms) streamed=${sawAssistantDelta} closed=${closed}`,
       );
 
       if (closed) {
@@ -391,6 +400,10 @@ export async function handleOpenAiHttpRequest(
         });
       }
     } catch (err) {
+      console.error(
+        `[openai-http] ${runId} agentCommand error (+${Date.now() - reqStartMs}ms):`,
+        err instanceof Error ? err.message : err,
+      );
       if (closed) {
         return;
       }

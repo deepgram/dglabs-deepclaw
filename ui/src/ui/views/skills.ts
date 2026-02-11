@@ -113,7 +113,7 @@ export function renderSkills(props: SkillsProps) {
                       <span>${group.label}</span>
                       <span class="muted">${group.skills.length}</span>
                     </summary>
-                    <div class="list skills-grid">
+                    <div class="skill-list">
                       ${group.skills.map((skill) => renderSkill(skill, props))}
                     </div>
                   </details>
@@ -124,6 +124,10 @@ export function renderSkills(props: SkillsProps) {
       }
     </section>
   `;
+}
+
+function abbreviateSource(source: string): string {
+  return source.replace(/^openclaw-/, "");
 }
 
 function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
@@ -145,111 +149,99 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
   if (skill.blockedByAllowlist) {
     reasons.push("blocked by allowlist");
   }
+  const hasExtra = Boolean(skill.primaryEnv) || canInstall;
+
   return html`
-    <div class="list-item">
-      <div class="list-main">
-        <div class="list-title">
-          ${skill.emoji ? `${skill.emoji} ` : ""}${skill.name}
-        </div>
-        <div class="list-sub">${clampText(skill.description, 140)}</div>
-        <div class="chip-row" style="margin-top: 6px;">
-          <span class="chip">${skill.source}</span>
-          ${
-            showBundledBadge
-              ? html`
-                  <span class="chip">bundled</span>
-                `
-              : nothing
-          }
-          <span class="chip ${skill.eligible ? "chip-ok" : "chip-warn"}">
-            ${skill.eligible ? "eligible" : "blocked"}
-          </span>
-          ${
-            skill.disabled
-              ? html`
-                  <span class="chip chip-warn">disabled</span>
-                `
-              : nothing
-          }
-        </div>
+    <div class="skill-row">
+      <div class="skill-row__name">
+        ${skill.emoji ? `${skill.emoji} ` : ""}${skill.name}
+      </div>
+      <div class="skill-row__desc">${clampText(skill.description, 80)}</div>
+      <div class="skill-row__chips">
+        <span class="chip">${abbreviateSource(skill.source)}</span>
         ${
-          missing.length > 0
+          showBundledBadge
             ? html`
-              <div class="muted" style="margin-top: 6px;">
-                Missing: ${missing.join(", ")}
-              </div>
-            `
+                <span class="chip">bundled</span>
+              `
             : nothing
         }
+        <span
+          class="chip ${skill.eligible ? "chip-ok" : "chip-warn"}"
+          title=${missing.length > 0 ? `Missing: ${missing.join(", ")}` : ""}
+        >
+          ${skill.eligible ? "eligible" : "blocked"}
+        </span>
         ${
-          reasons.length > 0
-            ? html`
-              <div class="muted" style="margin-top: 6px;">
-                Reason: ${reasons.join(", ")}
-              </div>
-            `
+          skill.disabled
+            ? html`<span
+                class="chip chip-warn"
+                title=${reasons.length > 0 ? reasons.join(", ") : ""}
+              >disabled</span>`
             : nothing
         }
       </div>
-      <div class="list-meta">
-        <div class="row" style="justify-content: flex-end; flex-wrap: wrap;">
-          <button
-            class="btn"
-            ?disabled=${busy}
-            @click=${() => props.onToggle(skill.skillKey, skill.disabled)}
-          >
-            ${skill.disabled ? "Enable" : "Disable"}
-          </button>
-          ${
-            canInstall
-              ? html`<button
-                class="btn"
-                ?disabled=${busy}
-                @click=${() => props.onInstall(skill.skillKey, skill.name, skill.install[0].id)}
-              >
-                ${busy ? "Installing…" : skill.install[0].label}
-              </button>`
-              : nothing
-          }
-        </div>
-        ${
-          message
-            ? html`<div
-              class="muted"
-              style="margin-top: 8px; color: ${
-                message.kind === "error"
-                  ? "var(--danger-color, #d14343)"
-                  : "var(--success-color, #0a7f5a)"
-              };"
-            >
-              ${message.message}
-            </div>`
-            : nothing
-        }
-        ${
-          skill.primaryEnv
-            ? html`
-              <div class="field" style="margin-top: 10px;">
-                <span>API key</span>
-                <input
-                  type="password"
-                  .value=${apiKey}
-                  @input=${(e: Event) =>
-                    props.onEdit(skill.skillKey, (e.target as HTMLInputElement).value)}
-                />
-              </div>
-              <button
-                class="btn primary"
-                style="margin-top: 8px;"
-                ?disabled=${busy}
-                @click=${() => props.onSaveKey(skill.skillKey)}
-              >
-                Save key
-              </button>
-            `
-            : nothing
-        }
+      <div class="skill-row__actions">
+        <button
+          class="btn btn--sm"
+          ?disabled=${busy}
+          @click=${() => props.onToggle(skill.skillKey, skill.disabled)}
+        >
+          ${skill.disabled ? "Enable" : "Disable"}
+        </button>
       </div>
     </div>
+    ${
+      message
+        ? html`<div class="skill-row__extra">
+            <span style="color: ${
+              message.kind === "error"
+                ? "var(--danger-color, #d14343)"
+                : "var(--success-color, #0a7f5a)"
+            }; font-size: 12px;">
+              ${message.message}
+            </span>
+          </div>`
+        : nothing
+    }
+    ${
+      hasExtra
+        ? html`<div class="skill-row__extra">
+            ${
+              canInstall
+                ? html`<button
+                    class="btn btn--sm"
+                    ?disabled=${busy}
+                    @click=${() => props.onInstall(skill.skillKey, skill.name, skill.install[0].id)}
+                  >
+                    ${busy ? "Installing…" : skill.install[0].label}
+                  </button>`
+                : nothing
+            }
+            ${
+              skill.primaryEnv
+                ? html`
+                    <label class="field" style="flex: 1; min-width: 160px;">
+                      <span>API key</span>
+                      <input
+                        type="password"
+                        .value=${apiKey}
+                        @input=${(e: Event) =>
+                          props.onEdit(skill.skillKey, (e.target as HTMLInputElement).value)}
+                      />
+                    </label>
+                    <button
+                      class="btn btn--sm primary"
+                      ?disabled=${busy}
+                      @click=${() => props.onSaveKey(skill.skillKey)}
+                    >
+                      Save key
+                    </button>
+                  `
+                : nothing
+            }
+          </div>`
+        : nothing
+    }
   `;
 }

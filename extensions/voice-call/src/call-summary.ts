@@ -55,8 +55,9 @@ export async function generateCallSummary(params: CallSummaryParams): Promise<vo
   const callerNumber = callRecord.direction === "inbound" ? callRecord.from : callRecord.to;
 
   const prompt = [
-    `Summarize this phone call in 2-3 concise sentences.`,
-    `Include: who called, what was discussed, any action items or outcomes.`,
+    `Summarize this phone call concisely.`,
+    `Include: who called, what was discussed, any specific requests or topics (name them),`,
+    `any action items or outcomes, and anything the caller might appreciate being remembered next time.`,
     `Write plain text only — no markdown formatting, no bullet points.\n`,
     `Call direction: ${direction}`,
     `Phone number: ${callerNumber}\n`,
@@ -93,7 +94,7 @@ export async function generateCallSummary(params: CallSummaryParams): Promise<vo
       runId: `call-summary:${callRecord.callId}`,
       lane: "voice",
       extraSystemPrompt:
-        "Summarize this phone call in 2-3 concise sentences. Include: who called, what was discussed, any action items or outcomes. Write plain text only.",
+        "Summarize this phone call concisely. Include: who called, what was discussed, any specific requests or topics, any action items or outcomes, and anything the caller might appreciate being remembered next time. Write plain text only.",
       agentDir,
     });
 

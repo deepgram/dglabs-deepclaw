@@ -42,8 +42,7 @@
       "sandbox": {
         "mode": "all",
         "sessionToolsVisibility": "all",
-        // TODO: machine-specific — adjust per deployment
-        "workspaceRoot": "/Users/billgetman/openclaw/sandboxes",
+        "workspaceRoot": "${OPENCLAW_SANDBOX_DIR}",
         "docker": {
           "image": "openclaw-sandbox-dev:local",
           "network": "openclaw-proxy",
@@ -58,8 +57,7 @@
           "pidsLimit": 512,
           "memory": "8g",
           "cpus": 4,
-          // TODO: machine-specific — adjust per deployment
-          "binds": ["/Users/billgetman/deepclaw:/deepclaw:rw"]
+          "binds": ["${OPENCLAW_SANDBOX_BIND:-/tmp/deepclaw:/deepclaw:rw}"]
         }
       }
     },
@@ -71,7 +69,7 @@
       {
         "id": "test-voice-agent",
         "agentType": "voice",
-        "name": "Test Voice Agent",
+        "name": "Voice Agent",
         "workspace": "/home/node/.openclaw/workspace/test-voice-agent",
         "agentDir": "/home/node/.openclaw/agents/test-voice-agent/agent",
         "model": {
@@ -90,7 +88,7 @@
           "session-logs"
         ],
         "identity": {
-          "name": "Test Voice Agent"
+          "name": "Voice Agent"
         }
       }
     ]
@@ -162,7 +160,7 @@
   "skills": {
     "load": {
       // TODO: machine-specific — adjust per deployment
-      "extraDirs": ["~/Documents/deepclaw-projects/deepclaw/skills"]
+      "extraDirs": ["${OPENCLAW_SKILLS_DIR:-}"]
     },
     "install": {
       "nodeManager": "npm"
