@@ -41,6 +41,7 @@
       },
       "sandbox": {
         "mode": "all",
+        "sessionToolsVisibility": "all",
         // TODO: machine-specific — adjust per deployment
         "workspaceRoot": "/Users/billgetman/openclaw/sandboxes",
         "docker": {
@@ -95,7 +96,11 @@
     ]
   },
   "tools": {
-    "deny": ["cron", "browser"]
+    "deny": ["cron", "browser"],
+    "agentToAgent": {
+      "enabled": true,
+      "allow": ["*"]
+    }
   },
   "messages": {
     "ackReactionScope": "group-mentions"

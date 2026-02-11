@@ -11,6 +11,7 @@ import type {
   ModelCatalogEntry,
   SkillStatusEntry,
   SkillStatusReport,
+  VoiceCallStatus,
 } from "../types.ts";
 import {
   expandToolGroups,
@@ -1390,6 +1391,61 @@ function renderAgentChannels(params: {
             : html`
               <div class="list" style="margin-top: 16px;">
                 ${entries.map((entry) => {
+                  // Voice call: show direction and routing instead of accounts
+                  if (entry.id === "voicecall") {
+                    const vc = (params.snapshot?.channels as Record<string, unknown> | null)
+                      ?.voicecall as VoiceCallStatus | undefined;
+                    const agentId = params.agent.id;
+                    const routed = vc?.numbers?.filter((n) => n.agentId === agentId);
+                    const isDefault = vc?.defaultAgentId === agentId;
+                    return html`
+                      <div class="list-item">
+                        <div class="list-main">
+                          <div class="list-title">${entry.label}</div>
+                          <div class="list-sub mono">${entry.id}</div>
+                        </div>
+                        <div class="list-meta">
+                          ${
+                            vc
+                              ? html`
+                                  <div>
+                                    ${
+                                      vc.inboundEnabled
+                                        ? html`
+                                            <span class="chip chip-ok" style="font-size: 0.75em">Inbound</span>
+                                          `
+                                        : nothing
+                                    }
+                                    <span class="chip chip-ok" style="font-size: 0.75em;">Outbound</span>
+                                  </div>
+                                  <div>${vc.running ? "Running" : "Stopped"} · ${vc.provider ?? "n/a"}</div>
+                                  ${
+                                    isDefault
+                                      ? html`
+                                          <div><span class="chip" style="font-size: 0.75em">Default Agent</span></div>
+                                        `
+                                      : nothing
+                                  }
+                                  ${
+                                    routed && routed.length > 0
+                                      ? routed.map(
+                                          (r) => html`<div>${r.number} (${r.direction})</div>`,
+                                        )
+                                      : !isDefault
+                                        ? html`
+                                            <div class="muted">No routing for this agent</div>
+                                          `
+                                        : nothing
+                                  }
+                                `
+                              : html`
+                                  <div>not configured</div>
+                                `
+                          }
+                        </div>
+                      </div>
+                    `;
+                  }
                   const summary = summarizeChannelAccounts(entry.accounts);
                   const status = summary.total
                     ? `${summary.connected}/${summary.total} connected`
