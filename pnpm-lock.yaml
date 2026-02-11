@@ -505,6 +505,12 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  extensions/twilio-sms:
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
   extensions/twitch:
     dependencies:
       '@twurple/api':

@@ -248,6 +248,28 @@ export type NostrStatus = {
   profile?: NostrProfile | null;
 };
 
+export type VoiceCallNumberRouting = {
+  number: string;
+  agentId: string;
+  direction: "inbound" | "outbound" | "both";
+};
+
+export type VoiceCallStatus = {
+  configured: boolean;
+  running: boolean;
+  provider: string | null;
+  fromNumber: string | null;
+  inboundPolicy: string;
+  inboundEnabled: boolean;
+  outboundEnabled: boolean;
+  direction: "outbound" | "both";
+  activeCalls: number;
+  lastError: string | null;
+  numbers: VoiceCallNumberRouting[];
+  defaultAgentId: string;
+  outboundMode: string;
+};
+
 export type MSTeamsProbe = {
   ok: boolean;
   error?: string | null;

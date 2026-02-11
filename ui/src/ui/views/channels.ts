@@ -11,6 +11,7 @@ import type {
   SignalStatus,
   SlackStatus,
   TelegramStatus,
+  VoiceCallStatus,
   WhatsAppStatus,
 } from "../types.ts";
 import type { ChannelKey, ChannelsChannelData, ChannelsProps } from "./channels.types.ts";
@@ -29,6 +30,7 @@ import {
 import { renderSignalCard } from "./channels.signal.ts";
 import { renderSlackCard } from "./channels.slack.ts";
 import { renderTelegramCard } from "./channels.telegram.ts";
+import { renderVoiceCallCard } from "./channels.voicecall.ts";
 import { renderWhatsAppCard } from "./channels.whatsapp.ts";
 
 export function renderChannels(props: ChannelsProps) {
@@ -41,6 +43,7 @@ export function renderChannels(props: ChannelsProps) {
   const signal = (channels?.signal ?? null) as SignalStatus | null;
   const imessage = (channels?.imessage ?? null) as IMessageStatus | null;
   const nostr = (channels?.nostr ?? null) as NostrStatus | null;
+  const voicecall = (channels?.voicecall ?? null) as VoiceCallStatus | null;
   const channelOrder = resolveChannelOrder(props.snapshot);
   const orderedChannels = channelOrder
     .map((key, index) => ({
@@ -64,6 +67,7 @@ export function renderChannels(props: ChannelsProps) {
     signal,
     imessage,
     nostr,
+    voicecall,
     channelAccounts: props.snapshot?.channelAccounts ?? null,
   };
 
@@ -101,6 +105,20 @@ export function renderChannels(props: ChannelsProps) {
                     : nothing
                 }
                 ${accountCount >= 2 ? html`<span class="chip">${accountCount} accounts</span>` : nothing}
+                ${
+                  channel.key === "voicecall" && channel.enabled && voicecall
+                    ? html`
+                      ${
+                        voicecall.inboundEnabled
+                          ? html`
+                              <span class="chip chip-ok">Inbound</span>
+                            `
+                          : nothing
+                      }
+                      <span class="chip chip-ok">Outbound</span>
+                    `
+                    : nothing
+                }
               </span>
               <span class="channel-summary__chevron">▸</span>
             </summary>
@@ -175,6 +193,11 @@ function renderChannel(key: ChannelKey, props: ChannelsProps, data: ChannelsChan
       return renderIMessageCard({
         props,
         imessage: data.imessage,
+      });
+    case "voicecall":
+      return renderVoiceCallCard({
+        props,
+        voicecall: data.voicecall,
       });
     case "nostr": {
       const nostrAccounts = data.channelAccounts?.nostr ?? [];

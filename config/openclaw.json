@@ -76,7 +76,11 @@
     ]
   },
   "tools": {
-    "deny": ["cron", "browser"]
+    "deny": ["cron", "browser"],
+    "agentToAgent": {
+      "enabled": true,
+      "allow": ["*"]
+    }
   },
   "messages": {
     "ackReactionScope": "group-mentions"
