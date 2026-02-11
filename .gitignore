@@ -62,6 +62,13 @@ apps/ios/*.dSYM.zip
 apps/ios/*.mobileprovision
 .env
 
+# Runtime data (workspace, sandboxes, agent state)
+data/
+
+# Config dir runtime artifacts (keep only openclaw.json)
+config/*
+!config/openclaw.json
+
 # Local untracked files
 .local/
 IDENTITY.md
