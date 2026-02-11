@@ -316,7 +316,10 @@ function resolvePerplexitySearchDomainFilter(perplexity?: PerplexityConfig): str
   if (!Array.isArray(domains) || domains.length === 0) {
     return undefined;
   }
-  return domains.map((d) => d.trim()).filter(Boolean);
+  return domains
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean)
+    .toSorted();
 }
 
 function resolvePerplexitySystemPrompt(perplexity?: PerplexityConfig): string | undefined {
@@ -557,7 +560,7 @@ async function runWebSearch(params: {
     params.provider === "brave"
       ? `${params.provider}:${params.query}:${params.count}:${params.country || "default"}:${params.search_lang || "default"}:${params.ui_lang || "default"}:${params.freshness || "default"}`
       : params.provider === "perplexity"
-        ? `${params.provider}:${params.query}:${params.perplexityBaseUrl ?? DEFAULT_PERPLEXITY_BASE_URL}:${params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL}:${params.perplexitySearchContextSize ?? "high"}:${params.perplexitySearchRecencyFilter ?? "none"}`
+        ? `${params.provider}:${params.query}:${params.perplexityBaseUrl ?? DEFAULT_PERPLEXITY_BASE_URL}:${params.perplexityModel ?? DEFAULT_PERPLEXITY_MODEL}:${params.perplexitySearchContextSize ?? "high"}:${params.perplexitySearchRecencyFilter ?? "none"}:${params.perplexitySearchDomainFilter?.join(",") ?? "none"}:${String(params.perplexityReturnRelatedQuestions ?? false)}:${params.perplexitySystemPrompt ?? "none"}`
         : `${params.provider}:${params.query}:${params.grokModel ?? DEFAULT_GROK_MODEL}:${String(params.grokInlineCitations ?? false)}`,
   );
   const cached = readCache(SEARCH_CACHE, cacheKey);
@@ -807,4 +810,5 @@ export const __testing = {
   resolveGrokApiKey,
   resolveGrokModel,
   resolveGrokInlineCitations,
+  resolvePerplexitySearchDomainFilter,
 } as const;
