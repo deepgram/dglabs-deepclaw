@@ -37,30 +37,22 @@ RUN apt-get update && apt-get install -y \
 RUN corepack enable
 
 WORKDIR /app
-
-# Copy built application
 COPY --from=builder /app /app
 
-# Set up data directory (using built-in node user from base image)
-RUN mkdir -p /data/.openclaw /data/.cache/node && \
-    chown -R node:node /data /app
+# Ensure node user owns the app and has a writable home
+RUN chown -R node:node /app /home/node
 
-ENV HOME=/data
-ENV OPENCLAW_DATA_DIR=/data
-ENV OPENCLAW_CONFIG_DIR=/data/.openclaw
-ENV OPENCLAW_STATE_DIR=/data/.openclaw
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--max-old-space-size=768"
-ENV NODE_COMPILE_CACHE=/data/.cache/node
+ENV NODE_COMPILE_CACHE=/home/node/.cache/node
 
-# Warm up: start gateway once during build to pre-generate first-run artifacts
+# Warm up with the REAL bundled config to pre-generate workspace files
+# (AGENTS.md, SOUL.md, USER.md, TOOLS.md, IDENTITY.md, HEARTBEAT.md, etc.)
 USER node
-RUN mkdir -p /data/.openclaw && \
-    cat > /data/.openclaw/openclaw.json <<'EOF'
-{"gateway":{"controlUi":{"dangerouslyDisableDeviceAuth":true,"allowedOrigins":["*"],"allowInsecureAuth":true},"trustedProxies":["0.0.0.0/0"]}}
-EOF
-RUN timeout 15 node /app/openclaw.mjs gateway --port 18789 --bind lan --allow-unconfigured --verbose --token warmup 2>&1 || true
-RUN rm -f /data/.openclaw/openclaw.json
+RUN mkdir -p /home/node/.openclaw
+COPY --chown=node:node config/openclaw.json /home/node/.openclaw/openclaw.json
+RUN timeout 15 node /app/openclaw.mjs gateway --port 18789 --bind lan \
+    --allow-unconfigured --verbose --token warmup 2>&1 || true
 USER root
 
 # Copy production entrypoint
@@ -73,7 +65,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
     CMD node /app/openclaw.mjs gateway health --url ws://localhost:18789 --timeout 5000 || exit 1
 
 USER node
-WORKDIR /data
+WORKDIR /home/node
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/bin/sh", "-c", "exec node /app/openclaw.mjs gateway --port 18789 --bind lan --allow-unconfigured --verbose --token \"$OPENCLAW_GATEWAY_TOKEN\""]

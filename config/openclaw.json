@@ -86,6 +86,19 @@
     "nativeSkills": "auto"
   },
   "channels": {},
+  "models": {
+    "providers": {
+      "anthropic": {
+        "baseUrl": "${ANTHROPIC_BASE_URL}",
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "models": [
+          { "id": "claude-opus-4-5", "name": "Claude Opus 4.5" },
+          { "id": "claude-sonnet-4-5-20250929", "name": "Claude Sonnet 4.5" },
+          { "id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5" }
+        ]
+      }
+    }
+  },
   "gateway": {
     "port": 18789,
     "mode": "local",
