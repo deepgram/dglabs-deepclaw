@@ -4,7 +4,7 @@ import {
   DEFAULT_COPILOT_API_BASE_URL,
   resolveCopilotApiToken,
 } from "../providers/github-copilot-token.js";
-import { discoverAnthropicModels, ANTHROPIC_BASE_URL } from "./anthropic-models.js";
+import { discoverAnthropicModels, resolveAnthropicBaseUrl } from "./anthropic-models.js";
 import { ensureAuthProfileStore, listProfilesForProvider } from "./auth-profiles.js";
 import { discoverBedrockModels } from "./bedrock-discovery.js";
 import {
@@ -419,7 +419,7 @@ async function buildOpenAiProvider(apiKey: string): Promise<ProviderConfig> {
 async function buildAnthropicProvider(apiKey: string): Promise<ProviderConfig> {
   const models = await discoverAnthropicModels({ apiKey });
   return {
-    baseUrl: ANTHROPIC_BASE_URL,
+    baseUrl: resolveAnthropicBaseUrl(),
     api: "anthropic-messages",
     models,
   };
