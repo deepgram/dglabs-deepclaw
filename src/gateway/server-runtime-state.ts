@@ -23,7 +23,6 @@ import {
 import { MAX_PAYLOAD_BYTES } from "./server-constants.js";
 import { createDictationUpgradeHandler } from "./server-dictation.js";
 import { attachGatewayUpgradeHandler, createGatewayHttpServer } from "./server-http.js";
-import { createVoiceStreamUpgradeHandler } from "./server-voice-stream.js";
 import { createGatewayHooksRequestHandler } from "./server/hooks.js";
 import { listenGatewayHttpServer } from "./server/http-listen.js";
 import { createGatewayPluginRequestHandler } from "./server/plugins-http.js";
@@ -51,7 +50,6 @@ export async function createGatewayRuntimeState(params: {
   logHooks: ReturnType<typeof createSubsystemLogger>;
   logPlugins: ReturnType<typeof createSubsystemLogger>;
   logDictation: ReturnType<typeof createSubsystemLogger>;
-  logVoiceStream: ReturnType<typeof createSubsystemLogger>;
 }): Promise<{
   canvasHost: CanvasHostHandler | null;
   httpServer: HttpServer;
@@ -172,17 +170,6 @@ export async function createGatewayRuntimeState(params: {
     maxPayload: MAX_PAYLOAD_BYTES,
   });
   const dictationHandler = createDictationUpgradeHandler({ log: params.logDictation });
-  const voiceCallPluginConfig = params.cfg.plugins?.entries?.["voice-call"]?.config as
-    | Record<string, unknown>
-    | undefined;
-  const voiceDefaultAgentId =
-    typeof voiceCallPluginConfig?.defaultAgentId === "string"
-      ? voiceCallPluginConfig.defaultAgentId
-      : undefined;
-  const voiceStreamHandler = createVoiceStreamUpgradeHandler({
-    log: params.logVoiceStream,
-    defaultAgentId: voiceDefaultAgentId,
-  });
   for (const server of httpServers) {
     attachGatewayUpgradeHandler({
       httpServer: server,
@@ -191,7 +178,6 @@ export async function createGatewayRuntimeState(params: {
       clients,
       resolvedAuth: params.resolvedAuth,
       dictationHandler,
-      voiceStreamHandler,
     });
   }
 

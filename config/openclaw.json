@@ -257,7 +257,7 @@
           },
           "skipSignatureVerification": true,
           "serve": {
-            "port": 3334,
+            "port": 8000,
             "bind": "0.0.0.0",
             "path": "/voice/webhook"
           },

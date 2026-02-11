@@ -6,3 +6,12 @@ primary_region = "sjc"
 
 [build]
 dockerfile = "Dockerfile.fly"
+
+# Voice call webhook server (Deepgram media bridge on port 8000)
+[[services]]
+internal_port = 8000
+protocol = "tcp"
+
+[[services.ports]]
+handlers = ["tls", "http"]
+port = 8000

@@ -10,7 +10,6 @@ import { createServer as createHttpsServer } from "node:https";
 import type { CanvasHostHandler } from "../canvas-host/server.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import type { DictationUpgradeHandler } from "./server-dictation.js";
-import type { VoiceStreamUpgradeHandler } from "./server-voice-stream.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 import { resolveAgentAvatar } from "../agents/identity-avatar.js";
 import {
@@ -422,17 +421,8 @@ export function attachGatewayUpgradeHandler(opts: {
   clients: Set<GatewayWsClient>;
   resolvedAuth: ResolvedGatewayAuth;
   dictationHandler?: DictationUpgradeHandler;
-  voiceStreamHandler?: VoiceStreamUpgradeHandler;
 }) {
-  const {
-    httpServer,
-    wss,
-    canvasHost,
-    clients,
-    resolvedAuth,
-    dictationHandler,
-    voiceStreamHandler,
-  } = opts;
+  const { httpServer, wss, canvasHost, clients, resolvedAuth, dictationHandler } = opts;
   httpServer.on("upgrade", (req, socket, head) => {
     void (async () => {
       if (canvasHost) {
@@ -455,10 +445,6 @@ export function attachGatewayUpgradeHandler(opts: {
         if (canvasHost.handleUpgrade(req, socket, head)) {
           return;
         }
-      }
-      // Check if this is a voice stream WebSocket request
-      if (voiceStreamHandler?.(req, socket, head, wss)) {
-        return;
       }
       // Check if this is a dictation WebSocket request
       if (dictationHandler?.(req, socket, head, wss)) {
