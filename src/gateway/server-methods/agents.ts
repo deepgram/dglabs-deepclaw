@@ -15,6 +15,7 @@ import {
   DEFAULT_IDENTITY_FILENAME,
   DEFAULT_MEMORY_ALT_FILENAME,
   DEFAULT_MEMORY_FILENAME,
+  DEFAULT_OBSERVATIONS_FILENAME,
   DEFAULT_SOUL_FILENAME,
   DEFAULT_TOOLS_FILENAME,
   DEFAULT_USER_FILENAME,
@@ -58,7 +59,13 @@ const BOOTSTRAP_FILE_NAMES = [
 
 const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
 
-const ALLOWED_FILE_NAMES = new Set<string>([...BOOTSTRAP_FILE_NAMES, ...MEMORY_FILE_NAMES]);
+const OPTIONAL_FILE_NAMES = [DEFAULT_OBSERVATIONS_FILENAME] as const;
+
+const ALLOWED_FILE_NAMES = new Set<string>([
+  ...BOOTSTRAP_FILE_NAMES,
+  ...MEMORY_FILE_NAMES,
+  ...OPTIONAL_FILE_NAMES,
+]);
 
 type FileMeta = {
   size: number;
@@ -145,6 +152,19 @@ async function listAgentFiles(workspaceDir: string) {
     } else {
       files.push({ name: DEFAULT_MEMORY_FILENAME, path: primaryMemoryPath, missing: true });
     }
+  }
+
+  // OBSERVATIONS.md is optional — only show if the observational-memory hook has created it
+  const observationsPath = path.join(workspaceDir, DEFAULT_OBSERVATIONS_FILENAME);
+  const observationsMeta = await statFile(observationsPath);
+  if (observationsMeta) {
+    files.push({
+      name: DEFAULT_OBSERVATIONS_FILENAME,
+      path: observationsPath,
+      missing: false,
+      size: observationsMeta.size,
+      updatedAtMs: observationsMeta.updatedAtMs,
+    });
   }
 
   return files;

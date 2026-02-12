@@ -52,12 +52,16 @@ export const InternalHookHandlerSchema = z
   })
   .strict();
 
+// .passthrough() allows hook-specific config keys (e.g. observational-memory's
+// "messages", "triggerEveryNTurns") without enumerating them here. Each hook
+// validates its own entries via resolveHookConfig(). Matches the TypeScript
+// HookConfig type which uses [key: string]: unknown.
 const HookConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
     env: z.record(z.string(), z.string()).optional(),
   })
-  .strict();
+  .passthrough();
 
 const HookInstallRecordSchema = z
   .object({
