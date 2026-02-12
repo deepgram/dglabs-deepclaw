@@ -495,6 +495,15 @@ export const VoiceCallConfigSchema = z
 
 export type VoiceCallConfig = z.infer<typeof VoiceCallConfigSchema>;
 
+/**
+ * Resolved config extends the Zod config with runtime-only fields
+ * that come from environment variables (not from user config).
+ */
+export type ResolvedVoiceCallConfig = VoiceCallConfig & {
+  /** Proxy URL for Twilio telephony (set via TWILIO_SMS_PROXY_URL env) */
+  proxyUrl?: string;
+};
+
 // -----------------------------------------------------------------------------
 // Caller History Configuration
 // -----------------------------------------------------------------------------
@@ -513,8 +522,14 @@ export type CallerHistoryConfig = {
  * Resolves the configuration by merging environment variables into missing fields.
  * Returns a new configuration object with environment variables applied.
  */
-export function resolveVoiceCallConfig(config: VoiceCallConfig): VoiceCallConfig {
-  const resolved = JSON.parse(JSON.stringify(config)) as VoiceCallConfig;
+export function resolveVoiceCallConfig(config: VoiceCallConfig): ResolvedVoiceCallConfig {
+  const resolved = JSON.parse(JSON.stringify(config)) as ResolvedVoiceCallConfig;
+
+  // Proxy mode: TWILIO_SMS_PROXY_URL means a proxy handles all Twilio interaction
+  const proxyUrl = process.env.TWILIO_SMS_PROXY_URL?.trim() || undefined;
+  if (proxyUrl) {
+    resolved.proxyUrl = proxyUrl;
+  }
 
   // Telnyx
   if (resolved.provider === "telnyx") {
@@ -638,15 +653,20 @@ export function validateProviderConfig(config: VoiceCallConfig): {
         "plugins.entries.voice-call.config.deepgram.apiKey is required (or set DEEPGRAM_API_KEY env)",
       );
     }
-    if (!config.twilio?.accountSid) {
-      errors.push(
-        "plugins.entries.voice-call.config.twilio.accountSid is required for Deepgram hybrid mode (or set TWILIO_ACCOUNT_SID env)",
-      );
-    }
-    if (!config.twilio?.authToken) {
-      errors.push(
-        "plugins.entries.voice-call.config.twilio.authToken is required for Deepgram hybrid mode (or set TWILIO_AUTH_TOKEN env)",
-      );
+    // In proxy mode (TWILIO_SMS_PROXY_URL set), Twilio credentials are not required
+    // because the proxy handles Twilio interaction directly.
+    const isProxyMode = !!process.env.TWILIO_SMS_PROXY_URL;
+    if (!isProxyMode) {
+      if (!config.twilio?.accountSid) {
+        errors.push(
+          "plugins.entries.voice-call.config.twilio.accountSid is required for Deepgram hybrid mode (or set TWILIO_ACCOUNT_SID env)",
+        );
+      }
+      if (!config.twilio?.authToken) {
+        errors.push(
+          "plugins.entries.voice-call.config.twilio.authToken is required for Deepgram hybrid mode (or set TWILIO_AUTH_TOKEN env)",
+        );
+      }
     }
   }
 

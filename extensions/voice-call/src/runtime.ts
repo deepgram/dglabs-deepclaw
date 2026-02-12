@@ -1,4 +1,4 @@
-import type { VoiceCallConfig } from "./config.js";
+import type { ResolvedVoiceCallConfig, VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type { TelephonyTtsRuntime } from "./telephony-tts.js";
@@ -22,7 +22,7 @@ import {
 } from "./webhook.js";
 
 export type VoiceCallRuntime = {
-  config: VoiceCallConfig;
+  config: ResolvedVoiceCallConfig;
   provider: VoiceCallProvider;
   manager: CallManager;
   webhookServer: VoiceCallWebhookServer;
@@ -45,7 +45,7 @@ function isLoopbackBind(bind: string | undefined): boolean {
   return bind === "127.0.0.1" || bind === "::1" || bind === "localhost";
 }
 
-function resolveProvider(config: VoiceCallConfig): VoiceCallProvider {
+function resolveProvider(config: ResolvedVoiceCallConfig): VoiceCallProvider {
   const allowNgrokFreeTierLoopbackBypass =
     config.tunnel?.provider === "ngrok" &&
     isLoopbackBind(config.serve?.bind) &&
@@ -103,6 +103,7 @@ function resolveProvider(config: VoiceCallConfig): VoiceCallProvider {
           skipVerification: config.skipSignatureVerification,
           streamPath: config.streaming?.streamPath || "/voice/stream",
           webhookSecurity: config.webhookSecurity,
+          proxyUrl: config.proxyUrl,
         },
       );
     case "mock":

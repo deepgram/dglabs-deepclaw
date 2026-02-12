@@ -40,14 +40,17 @@ export interface TwilioProviderOptions {
   skipVerification?: boolean;
   /** Webhook security options (forwarded headers/allowlist) */
   webhookSecurity?: WebhookSecurityConfig;
+  /** Proxy URL for Twilio telephony — when set, all API calls go through the proxy and webhook verification is skipped */
+  proxyUrl?: string;
 }
 
 export class TwilioProvider implements VoiceCallProvider {
   readonly name = "twilio" as const;
 
-  private readonly accountSid: string;
-  private readonly authToken: string;
-  private readonly baseUrl: string;
+  private readonly accountSid: string | undefined;
+  private readonly authToken: string | undefined;
+  private readonly baseUrl: string | undefined;
+  private readonly proxyUrl: string | undefined;
   private readonly callWebhookUrls = new Map<string, string>();
   private readonly options: TwilioProviderOptions;
 
@@ -146,16 +149,24 @@ export class TwilioProvider implements VoiceCallProvider {
   }
 
   constructor(config: TwilioConfig, options: TwilioProviderOptions = {}) {
-    if (!config.accountSid) {
-      throw new Error("Twilio Account SID is required");
-    }
-    if (!config.authToken) {
-      throw new Error("Twilio Auth Token is required");
+    this.proxyUrl = options.proxyUrl;
+
+    // In proxy mode, Twilio credentials are not required — the proxy handles
+    // all direct Twilio API interaction and webhook signature verification.
+    if (!this.proxyUrl) {
+      if (!config.accountSid) {
+        throw new Error("Twilio Account SID is required");
+      }
+      if (!config.authToken) {
+        throw new Error("Twilio Auth Token is required");
+      }
     }
 
     this.accountSid = config.accountSid;
     this.authToken = config.authToken;
-    this.baseUrl = `https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}`;
+    this.baseUrl = config.accountSid
+      ? `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}`
+      : undefined;
     this.options = options;
 
     if (options.publicUrl) {
@@ -213,16 +224,21 @@ export class TwilioProvider implements VoiceCallProvider {
 
   /**
    * Make an authenticated request to the Twilio API.
+   * In proxy mode, routes the request through the proxy instead.
    */
   private async apiRequest<T = unknown>(
     endpoint: string,
     params: Record<string, string | string[]>,
     options?: { allowNotFound?: boolean },
   ): Promise<T> {
+    if (this.proxyUrl) {
+      return await this.proxyApiRequest<T>(endpoint, params, options);
+    }
+
     return await twilioApiRequest<T>({
-      baseUrl: this.baseUrl,
-      accountSid: this.accountSid,
-      authToken: this.authToken,
+      baseUrl: this.baseUrl!,
+      accountSid: this.accountSid!,
+      authToken: this.authToken!,
       endpoint,
       body: params,
       allowNotFound: options?.allowNotFound,
@@ -230,7 +246,40 @@ export class TwilioProvider implements VoiceCallProvider {
   }
 
   /**
+   * Route a Twilio API request through the proxy.
+   */
+  private async proxyApiRequest<T = unknown>(
+    endpoint: string,
+    params: Record<string, string | string[]>,
+    options?: { allowNotFound?: boolean },
+  ): Promise<T> {
+    const body = { endpoint, params };
+
+    console.log(`[voice-call] Twilio API via proxy: ${endpoint}`);
+
+    const response = await fetch(`${this.proxyUrl}/voice`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      if (options?.allowNotFound && response.status === 404) {
+        return undefined as T;
+      }
+      const errorText = await response.text();
+      throw new Error(`Voice proxy error: ${response.status} ${errorText}`);
+    }
+
+    const text = await response.text();
+    return text ? (JSON.parse(text) as T) : (undefined as T);
+  }
+
+  /**
    * Verify Twilio webhook signature using HMAC-SHA1.
+   *
+   * In proxy mode, verification is skipped — the proxy already verified
+   * the original Twilio signature before forwarding.
    *
    * Handles reverse proxy scenarios (Tailscale, nginx, ngrok) by reconstructing
    * the public URL from forwarding headers.
@@ -238,9 +287,14 @@ export class TwilioProvider implements VoiceCallProvider {
    * @see https://www.twilio.com/docs/usage/webhooks/webhooks-security
    */
   verifyWebhook(ctx: WebhookContext): WebhookVerificationResult {
+    if (this.proxyUrl) {
+      console.log("[voice-call] webhook verification skipped (proxy mode)");
+      return { ok: true };
+    }
+
     return verifyTwilioProviderWebhook({
       ctx,
-      authToken: this.authToken,
+      authToken: this.authToken!,
       currentPublicUrl: this.currentPublicUrl,
       options: this.options,
     });
