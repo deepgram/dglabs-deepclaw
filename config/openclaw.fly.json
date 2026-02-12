@@ -1,0 +1,285 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.2.6-3",
+    "lastTouchedAt": "2026-02-10T16:36:50.353Z"
+  },
+  "env": {
+    "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
+  },
+  "wizard": {
+    "lastRunAt": "2026-02-04T19:59:41.469Z",
+    "lastRunVersion": "2026.2.3",
+    "lastRunCommand": "configure",
+    "lastRunMode": "local"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "anthropic/claude-opus-4-5"
+      },
+      "models": {
+        "anthropic/claude-opus-4-5": {
+          "params": {
+            "cacheRetention": "short"
+          }
+        }
+      },
+      "workspace": "/home/node/.openclaw/workspace",
+      "contextPruning": {
+        "mode": "cache-ttl",
+        "ttl": "1h"
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "heartbeat": {
+        "every": "30m"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      },
+      "sandbox": {
+        "mode": "off"
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "anthropic/claude-sonnet-4-5-20250929"
+      },
+      {
+        "id": "voice-agent",
+        "agentType": "voice",
+        "name": "Voice Agent",
+        "workspace": "/home/node/.openclaw/workspace/voice-agent",
+        "agentDir": "/home/node/.openclaw/agents/voice-agent/agent",
+        "model": {
+          "primary": "anthropic/claude-sonnet-4-5-20250929"
+        },
+        "skills": [
+          "healthcheck",
+          "notion",
+          "slack",
+          "summarize",
+          "voice-call",
+          "weather",
+          "calendar",
+          "glean-search",
+          "openai-image-gen",
+          "session-logs"
+        ],
+        "identity": {
+          "name": "Voice Agent"
+        }
+      }
+    ]
+  },
+  "tools": {
+    "deny": ["cron", "browser"],
+    "message": {
+      "crossContext": {
+        "allowAcrossProviders": true
+      }
+    },
+    "agentToAgent": {
+      "enabled": true,
+      "allow": ["*"]
+    }
+  },
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  "channels": {
+    "twilio-sms": {
+      "enabled": true,
+      "webhookPath": "/twilio-sms",
+      "dm": {
+        "policy": "open"
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "anthropic": {
+        "baseUrl": "${ANTHROPIC_BASE_URL}",
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "models": [
+          { "id": "claude-opus-4-5", "name": "Claude Opus 4.5" },
+          { "id": "claude-sonnet-4-5-20250929", "name": "Claude Sonnet 4.5" },
+          { "id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5" }
+        ]
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "lan",
+    "controlUi": {
+      "dangerouslyDisableDeviceAuth": true
+    },
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "skills": {
+    "load": {
+      "extraDirs": ["${OPENCLAW_SKILLS_DIR:-}"]
+    },
+    "install": {
+      "nodeManager": "npm"
+    },
+    "entries": {
+      "nano-banana-pro": {
+        "enabled": false
+      },
+      "deepclaw-voice": {
+        "enabled": false
+      },
+      "openai-whisper": {
+        "enabled": false
+      },
+      "openai-whisper-api": {
+        "enabled": false
+      },
+      "ordercli": {
+        "enabled": false
+      },
+      "peekaboo": {
+        "enabled": false
+      },
+      "oracle": {
+        "enabled": false
+      },
+      "sag": {
+        "enabled": false
+      },
+      "songsee": {
+        "enabled": false
+      },
+      "sonoscli": {
+        "enabled": false
+      },
+      "spotify-player": {
+        "enabled": false
+      },
+      "things-mac": {
+        "enabled": false
+      },
+      "trello": {
+        "enabled": false
+      },
+      "wacli": {
+        "enabled": false
+      },
+      "1password": {
+        "enabled": false
+      },
+      "apple-notes": {
+        "enabled": false
+      },
+      "bear-notes": {
+        "enabled": false
+      },
+      "apple-reminders": {
+        "enabled": false
+      },
+      "blogwatcher": {
+        "enabled": false
+      },
+      "blucli": {
+        "enabled": false
+      },
+      "bluebubbles": {
+        "enabled": false
+      },
+      "camsnap": {
+        "enabled": false
+      },
+      "clawhub": {
+        "enabled": false
+      },
+      "eightctl": {
+        "enabled": false
+      },
+      "github": {
+        "enabled": false
+      },
+      "gog": {
+        "enabled": false
+      },
+      "mcporter": {
+        "enabled": false
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "twilio-sms": {
+        "enabled": true
+      },
+      "slack": {
+        "enabled": true
+      },
+      "voice-call": {
+        "enabled": true,
+        "config": {
+          "enabled": true,
+          "provider": "deepgram",
+          "defaultAgentId": "voice-agent",
+          "numbers": {
+            "+16087057765": {
+              "agentId": "voice-agent",
+              "direction": "both"
+            }
+          },
+          "fromNumber": "+16087057765",
+          "deepgram": {
+            "stt": {
+              "model": "nova-3"
+            },
+            "tts": {
+              "model": "aura-2-thalia-en"
+            },
+            "language": "en-US",
+            "latency": {
+              "fillerThresholdMs": 3000,
+              "fillerPhrases": [
+                "One moment please. ",
+                "Let me look into that. ",
+                "Sure, let me check. ",
+                "Just a moment. "
+              ],
+              "dynamicFiller": true
+            }
+          },
+          "skipSignatureVerification": true,
+          "serve": {
+            "port": 8000,
+            "bind": "0.0.0.0",
+            "path": "/voice/webhook"
+          },
+          "timezone": "America/New_York",
+          "inboundPolicy": "open"
+        }
+      }
+    }
+  }
+}
