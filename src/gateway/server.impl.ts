@@ -164,6 +164,7 @@ export async function startGatewayServer(
 ): Promise<GatewayServer> {
   // Ensure all default port derivations (browser/canvas) see the actual runtime port.
   process.env.OPENCLAW_GATEWAY_PORT = String(port);
+  process.env.OPENCLAW_GATEWAY_LOOPBACK = "1";
   logAcceptedEnvOption({
     key: "OPENCLAW_RAW_STREAM",
     description: "raw stream logging enabled",
@@ -654,6 +655,7 @@ export async function startGatewayServer(
         skillsRefreshTimer = null;
       }
       skillsChangeUnsub();
+      delete process.env.OPENCLAW_GATEWAY_LOOPBACK;
       await close(opts);
     },
   };

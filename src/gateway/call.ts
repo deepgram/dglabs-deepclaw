@@ -101,8 +101,9 @@ export function buildGatewayConnectionDetails(
   const localPort = resolveGatewayPort(config);
   const tailnetIPv4 = pickPrimaryTailnetIPv4();
   const bindMode = config.gateway?.bind ?? "loopback";
-  const preferTailnet = bindMode === "tailnet" && !!tailnetIPv4;
-  const preferLan = bindMode === "lan";
+  const inProcess = process.env.OPENCLAW_GATEWAY_LOOPBACK === "1";
+  const preferTailnet = bindMode === "tailnet" && !!tailnetIPv4 && !inProcess;
+  const preferLan = bindMode === "lan" && !inProcess;
   const lanIPv4 = preferLan ? pickPrimaryLanIPv4() : undefined;
   const scheme = tlsEnabled ? "wss" : "ws";
   const localUrl =

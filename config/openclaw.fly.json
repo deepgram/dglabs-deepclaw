@@ -40,25 +40,7 @@
         "maxConcurrent": 8
       },
       "sandbox": {
-        "mode": "all",
-        "sessionToolsVisibility": "all",
-        "workspaceRoot": "${OPENCLAW_SANDBOX_DIR}",
-        "docker": {
-          "image": "openclaw-sandbox-dev:local",
-          "network": "openclaw-proxy",
-          "capDrop": ["ALL"],
-          "env": {
-            "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
-            "OPENAI_API_KEY": "${OPENAI_API_KEY}",
-            "HTTP_PROXY": "http://openclaw-squid-proxy:3128",
-            "HTTPS_PROXY": "http://openclaw-squid-proxy:3128",
-            "NO_PROXY": "localhost,127.0.0.1,host.docker.internal"
-          },
-          "pidsLimit": 512,
-          "memory": "8g",
-          "cpus": 4,
-          "binds": ["${OPENCLAW_SANDBOX_BIND}"]
-        }
+        "mode": "off"
       }
     },
     "list": [
@@ -74,28 +56,6 @@
         "agentDir": "/home/node/.openclaw/agents/voice-agent/agent",
         "model": {
           "primary": "anthropic/claude-sonnet-4-5-20250929"
-        },
-        "tools": {
-          "deny": ["exec"],
-          "sandbox": {
-            "tools": {
-              "allow": [
-                "exec",
-                "process",
-                "read",
-                "write",
-                "edit",
-                "apply_patch",
-                "image",
-                "sessions_list",
-                "sessions_history",
-                "sessions_send",
-                "sessions_spawn",
-                "session_status",
-                "message"
-              ]
-            }
-          }
         },
         "skills": [
           "healthcheck",
@@ -137,37 +97,22 @@
   "channels": {
     "twilio-sms": {
       "enabled": true,
-      // Local: voice-call proxies /text/webhook → gateway. Prod: Twilio hits /twilio-sms directly.
-      "webhookPath": "/text/webhook",
+      "webhookPath": "/twilio-sms",
       "dm": {
         "policy": "open"
       }
-    },
-    "slack": {
-      "mode": "socket",
-      "webhookPath": "/slack/events",
-      "enabled": true,
-      "botToken": "${SLACK_BOT_TOKEN}",
-      "appToken": "${SLACK_APP_TOKEN}",
-      "userTokenReadOnly": true,
-      "groupPolicy": "allowlist",
-      "dm": {
-        "enabled": true,
-        "policy": "pairing"
-      },
-      "channels": {
-        "C0A4UQCUD6D": {
-          "allow": true
-        },
-        "#dg-labs": {
-          "allow": true
-        },
-        "#team-dglabs": {
-          "allow": true
-        },
-        "#bix-revops": {
-          "allow": true
-        }
+    }
+  },
+  "models": {
+    "providers": {
+      "anthropic": {
+        "baseUrl": "${ANTHROPIC_BASE_URL}",
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "models": [
+          { "id": "claude-opus-4-5", "name": "Claude Opus 4.5" },
+          { "id": "claude-sonnet-4-5-20250929", "name": "Claude Sonnet 4.5" },
+          { "id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5" }
+        ]
       }
     }
   },
@@ -175,8 +120,9 @@
     "port": 18789,
     "mode": "local",
     "bind": "lan",
-    "controlUi": {},
-    "trustedProxies": ["172.16.0.0/12", "192.168.0.0/16", "10.0.0.0/8"],
+    "controlUi": {
+      "dangerouslyDisableDeviceAuth": true
+    },
     "auth": {
       "mode": "token",
       "token": "${OPENCLAW_GATEWAY_TOKEN}"
@@ -195,7 +141,6 @@
   },
   "skills": {
     "load": {
-      // TODO: machine-specific — adjust per deployment
       "extraDirs": ["${OPENCLAW_SKILLS_DIR:-}"]
     },
     "install": {
@@ -203,8 +148,7 @@
     },
     "entries": {
       "nano-banana-pro": {
-        "enabled": true,
-        "apiKey": "${GOOGLE_API_KEY}"
+        "enabled": false
       },
       "deepclaw-voice": {
         "enabled": false
@@ -288,10 +232,10 @@
   },
   "plugins": {
     "entries": {
-      "slack": {
+      "twilio-sms": {
         "enabled": true
       },
-      "twilio-sms": {
+      "slack": {
         "enabled": true
       },
       "voice-call": {
@@ -306,6 +250,7 @@
               "direction": "both"
             }
           },
+          // TODO: fromNumber is hardcoded — move to env var or remove if Twilio handles routing
           "fromNumber": "+16087057765",
           "deepgram": {
             "stt": {
@@ -328,7 +273,7 @@
           },
           "skipSignatureVerification": true,
           "serve": {
-            "port": 3334,
+            "port": 8000,
             "bind": "0.0.0.0",
             "path": "/voice/webhook"
           },

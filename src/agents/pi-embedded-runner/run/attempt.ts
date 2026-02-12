@@ -261,6 +261,10 @@ export async function runEmbeddedAttempt(
           disableMessageTool: params.disableMessageTool,
         });
     const tools = sanitizeToolsForGoogle({ tools: toolsRaw, provider: params.provider });
+    // diagnostic: log available tools for this agent session
+    console.log(
+      `[agent-tools] session=${params.sessionKey ?? "?"} tools=[${tools.map((t: { name: string }) => t.name).join(", ")}]`,
+    );
     logToolSchemasForGoogle({ tools, provider: params.provider });
 
     const machineName = await getMachineDisplayName();

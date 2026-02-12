@@ -78,6 +78,7 @@ data/workspace/skills/
 # Config dir runtime artifacts (keep only openclaw.json)
 config/*
 !config/openclaw.json
+!config/openclaw.fly.json
 
 # Local untracked files
 .local/

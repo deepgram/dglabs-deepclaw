@@ -8,17 +8,9 @@ import {
   resolveDefaultAgentId,
 } from "../../agents/agent-scope.js";
 import {
-  DEFAULT_AGENTS_FILENAME,
-  DEFAULT_BOOTSTRAP_FILENAME,
-  DEFAULT_CALLS_FILENAME,
-  DEFAULT_HEARTBEAT_FILENAME,
-  DEFAULT_IDENTITY_FILENAME,
-  DEFAULT_MEMORY_ALT_FILENAME,
+  BOOTSTRAP_FILE_REGISTRY,
   DEFAULT_MEMORY_FILENAME,
-  DEFAULT_OBSERVATIONS_FILENAME,
-  DEFAULT_SOUL_FILENAME,
-  DEFAULT_TOOLS_FILENAME,
-  DEFAULT_USER_FILENAME,
+  DEFAULT_MEMORY_ALT_FILENAME,
   ensureAgentWorkspace,
 } from "../../agents/workspace.js";
 import { movePathToTrash } from "../../browser/trash.js";
@@ -46,25 +38,21 @@ import {
 } from "../protocol/index.js";
 import { listAgentsForGateway } from "../session-utils.js";
 
-const BOOTSTRAP_FILE_NAMES = [
-  DEFAULT_AGENTS_FILENAME,
-  DEFAULT_SOUL_FILENAME,
-  DEFAULT_TOOLS_FILENAME,
-  DEFAULT_IDENTITY_FILENAME,
-  DEFAULT_USER_FILENAME,
-  DEFAULT_HEARTBEAT_FILENAME,
-  DEFAULT_BOOTSTRAP_FILENAME,
-  DEFAULT_CALLS_FILENAME,
-] as const;
+// Derived from the central BOOTSTRAP_FILE_REGISTRY — no need to maintain
+// separate lists here. Required files are always shown (even if missing).
+// Optional files are only shown when they exist on disk.
+const REQUIRED_FILE_NAMES = BOOTSTRAP_FILE_REGISTRY.filter((e) => e.required).map((e) => e.name);
+const OPTIONAL_FILE_NAMES = BOOTSTRAP_FILE_REGISTRY.filter(
+  (e) => !e.required && e.name !== DEFAULT_MEMORY_FILENAME,
+).map((e) => e.name);
 
-const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
-
-const OPTIONAL_FILE_NAMES = [DEFAULT_OBSERVATIONS_FILENAME] as const;
-
+// ALLOWED_FILE_NAMES gates the files.get/files.set API — only names in this
+// set can be read or written through the gateway.
 const ALLOWED_FILE_NAMES = new Set<string>([
-  ...BOOTSTRAP_FILE_NAMES,
-  ...MEMORY_FILE_NAMES,
+  ...REQUIRED_FILE_NAMES,
   ...OPTIONAL_FILE_NAMES,
+  DEFAULT_MEMORY_FILENAME,
+  DEFAULT_MEMORY_ALT_FILENAME,
 ]);
 
 type FileMeta = {
@@ -106,7 +94,8 @@ async function listAgentFiles(workspaceDir: string) {
     updatedAtMs?: number;
   }> = [];
 
-  for (const name of BOOTSTRAP_FILE_NAMES) {
+  // Required files — always shown (marked missing if absent on disk).
+  for (const name of REQUIRED_FILE_NAMES) {
     const filePath = path.join(workspaceDir, name);
     const symlink = await isSymlink(filePath);
     const meta = await statFile(filePath);
@@ -128,6 +117,7 @@ async function listAgentFiles(workspaceDir: string) {
     }
   }
 
+  // Memory files — special handling for lowercase alias + dedup.
   const primaryMemoryPath = path.join(workspaceDir, DEFAULT_MEMORY_FILENAME);
   const primaryMeta = await statFile(primaryMemoryPath);
   if (primaryMeta) {
@@ -154,17 +144,20 @@ async function listAgentFiles(workspaceDir: string) {
     }
   }
 
-  // OBSERVATIONS.md is optional — only show if the observational-memory hook has created it
-  const observationsPath = path.join(workspaceDir, DEFAULT_OBSERVATIONS_FILENAME);
-  const observationsMeta = await statFile(observationsPath);
-  if (observationsMeta) {
-    files.push({
-      name: DEFAULT_OBSERVATIONS_FILENAME,
-      path: observationsPath,
-      missing: false,
-      size: observationsMeta.size,
-      updatedAtMs: observationsMeta.updatedAtMs,
-    });
+  // Optional files — only shown when they exist on disk (created by
+  // plugins/hooks at runtime: OBSERVATIONS.md, CALENDAR.md, etc.).
+  for (const name of OPTIONAL_FILE_NAMES) {
+    const filePath = path.join(workspaceDir, name);
+    const meta = await statFile(filePath);
+    if (meta) {
+      files.push({
+        name,
+        path: filePath,
+        missing: false,
+        size: meta.size,
+        updatedAtMs: meta.updatedAtMs,
+      });
+    }
   }
 
   return files;

@@ -200,9 +200,20 @@ export async function handleTwilioSmsWebhookRequest(
     return true;
   }
 
+  const numMedia = parseInt(fields.NumMedia ?? "0", 10);
   console.log(
     `[twilio-sms] inbound SMS: sid=${fields.MessageSid} from=${fields.From} to=${fields.To} body="${(fields.Body ?? "").slice(0, 80)}" media=${fields.NumMedia ?? 0}`,
   );
+  if (numMedia > 0) {
+    for (let i = 0; i < numMedia; i++) {
+      console.log(
+        `[twilio-sms] media[${i}]: url=${fields[`MediaUrl${i}`] ?? "<missing>"} type=${fields[`MediaContentType${i}`] ?? "<missing>"}`,
+      );
+    }
+    // Log all field keys when media expected — helps diagnose missing MediaUrl fields
+    const fieldKeys = Object.keys(fields).sort().join(", ");
+    console.log(`[twilio-sms] webhook field keys: ${fieldKeys}`);
+  }
 
   const twilioSignature = req.headers["x-twilio-signature"];
   const signatureStr = Array.isArray(twilioSignature) ? twilioSignature[0] : twilioSignature;
@@ -398,13 +409,24 @@ async function processInboundMessage(
       try {
         const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
         // Twilio media URLs require Basic auth to download; proxy-hosted URLs don't
-        const headers: Record<string, string> = {};
+        let authFetch: typeof fetch | undefined;
         if (account.accountSid && account.authToken) {
-          headers.Authorization = `Basic ${Buffer.from(`${account.accountSid}:${account.authToken}`).toString("base64")}`;
+          const credentials = Buffer.from(`${account.accountSid}:${account.authToken}`).toString(
+            "base64",
+          );
+          authFetch = (input, init) =>
+            fetch(input, {
+              ...init,
+              headers: {
+                ...Object.fromEntries(new Headers(init?.headers).entries()),
+                Authorization: `Basic ${credentials}`,
+              },
+            });
         }
-        const loaded = await core.channel.media.fetchRemoteMedia(first.url, {
+        const loaded = await core.channel.media.fetchRemoteMedia({
+          url: first.url,
           maxBytes,
-          headers,
+          fetchImpl: authFetch,
         });
         const saved = await core.channel.media.saveMediaBuffer(
           loaded.buffer,

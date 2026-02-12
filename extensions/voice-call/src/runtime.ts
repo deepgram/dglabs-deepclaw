@@ -2,6 +2,7 @@ import type { VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type { TelephonyTtsRuntime } from "./telephony-tts.js";
+import { extractAgentIdentityFromCall } from "./agent-identity-extraction.js";
 import { generateCallSummary } from "./call-summary.js";
 import { resolveVoiceCallConfig, validateProviderConfig } from "./config.js";
 import { DeepgramMediaBridge } from "./deepgram-media-bridge.js";
@@ -243,6 +244,12 @@ export async function createVoiceCallRuntime(params: {
           agentId,
         });
         void extractUserProfileFromCall({
+          voiceConfig: config,
+          coreConfig,
+          callRecord,
+          agentId,
+        });
+        void extractAgentIdentityFromCall({
           voiceConfig: config,
           coreConfig,
           callRecord,
