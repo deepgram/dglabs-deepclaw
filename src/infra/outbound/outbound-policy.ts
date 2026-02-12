@@ -107,13 +107,19 @@ export function enforceCrossContextPolicy(params: {
     params.cfg.tools?.message?.crossContext?.allowWithinProvider !== false;
   const allowAcrossProviders =
     params.cfg.tools?.message?.crossContext?.allowAcrossProviders === true;
+  // diagnostic: log cross-context policy evaluation
+  console.log(
+    `[cross-context] action=${params.action} channel=${params.channel} currentProvider=${currentProvider} allowAcross=${allowAcrossProviders}`,
+  );
 
   if (currentProvider && currentProvider !== params.channel) {
     if (!allowAcrossProviders) {
+      console.log(`[cross-context] DENIED: target="${params.channel}" bound="${currentProvider}"`);
       throw new Error(
         `Cross-context messaging denied: action=${params.action} target provider "${params.channel}" while bound to "${currentProvider}".`,
       );
     }
+    console.log(`[cross-context] ALLOWED cross-provider send`);
     return;
   }
 

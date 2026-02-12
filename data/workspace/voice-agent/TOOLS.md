@@ -1,6 +1,12 @@
 # TOOLS.md - Local Notes
 
-Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
+## SMS / Text Messaging
+
+You can send text messages using the `message` tool with channel `twilio-sms`.
+
+- **From number:** +18608514045
+- **To send a text:** Call the `message` function tool directly with action `send`, channel `twilio-sms`, and the recipient's phone number in E.164 format (e.g. `+15551234567`). Do NOT use bash/exec to run `openclaw` commands.
+- If you're on a call and the caller asks you to text them something, you already have their phone number from the call metadata.
 
 ## What Goes Here
 
@@ -12,28 +18,6 @@ Things like:
 - Speaker/room names
 - Device nicknames
 - Anything environment-specific
-
-## Examples
-
-```markdown
-### Cameras
-
-- living-room → Main area, 180° wide angle
-- front-door → Entrance, motion-triggered
-
-### SSH
-
-- home-server → 192.168.1.100, user: admin
-
-### TTS
-
-- Preferred voice: "Nova" (warm, slightly British)
-- Default speaker: Kitchen HomePod
-```
-
-## Why Separate?
-
-Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
 
 ---
 

@@ -406,6 +406,10 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         throw err;
       }
       const params = args as Record<string, unknown>;
+      // diagnostic: log message tool invocation
+      console.log(
+        `[message-tool] execute: action=${params.action} channel=${params.channel} target=${params.target} msg=${String(params.message ?? "").slice(0, 100)}`,
+      );
       const cfg = options?.config ?? loadConfig();
       const action = readStringParam(params, "action", {
         required: true,

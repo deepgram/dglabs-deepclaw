@@ -1052,6 +1052,9 @@ export async function runMessageAction(
   }
 
   const channel = await resolveChannel(cfg, params);
+  console.log(
+    `[message-dispatch] action=${action} channel=${channel} target=${params.target ?? params.to ?? "?"} message=${String(params.message ?? "").slice(0, 80)}`,
+  );
   const accountId = readStringParam(params, "accountId") ?? input.defaultAccountId;
   if (accountId) {
     params.accountId = accountId;
