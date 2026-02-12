@@ -19,6 +19,10 @@ min_machines_running = 0
 handlers = ["tls", "http"]
 port = 443
 
+[mounts]
+source = "agent_data"
+destination = "/home/node/.openclaw"
+
 [env]
 PUBLIC_URL = "https://deepclaw-instance.fly.dev"
 
