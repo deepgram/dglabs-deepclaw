@@ -3,6 +3,34 @@ import type { TwilioSmsSendResponse } from "./types.js";
 
 const TWILIO_API_BASE = "https://api.twilio.com/2010-04-01";
 
+async function sendSmsViaProxy(params: {
+  proxyUrl: string;
+  from?: string;
+  to: string;
+  text?: string;
+  mediaUrls?: string[];
+}): Promise<TwilioSmsSendResponse> {
+  const { proxyUrl, from, to, text, mediaUrls } = params;
+  const body = { from, to, text, mediaUrls };
+
+  console.log(
+    `[twilio-sms] Sending SMS via proxy to=${to} from=${from ?? "unknown"} bodyLen=${(text ?? "").length}`,
+  );
+
+  const response = await fetch(proxyUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`SMS proxy error: ${response.status} ${errorText}`);
+  }
+
+  return (await response.json()) as TwilioSmsSendResponse;
+}
+
 export async function sendTwilioSms(params: {
   account: ResolvedTwilioSmsAccount;
   to: string;
@@ -10,6 +38,18 @@ export async function sendTwilioSms(params: {
   mediaUrls?: string[];
 }): Promise<TwilioSmsSendResponse> {
   const { account, to, text, mediaUrls } = params;
+
+  // Proxy mode: no Twilio credentials, but proxy URL is available
+  if (!account.accountSid && account.proxyUrl) {
+    return sendSmsViaProxy({
+      proxyUrl: account.proxyUrl,
+      from: account.phoneNumber,
+      to,
+      text,
+      mediaUrls,
+    });
+  }
+
   if (!account.accountSid) {
     throw new Error("Twilio Account SID is not configured.");
   }
