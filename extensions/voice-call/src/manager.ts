@@ -681,6 +681,7 @@ export class CallManager {
         break;
 
       case "call.speaking":
+        this.addTranscriptEntry(call, "bot", event.text);
         this.transitionState(call, "speaking");
         break;
 

@@ -146,6 +146,7 @@ export function processEvent(ctx: CallManagerContext, event: NormalizedEvent): v
       break;
 
     case "call.speaking":
+      addTranscriptEntry(call, "bot", event.text);
       transitionState(call, "speaking");
       break;
 

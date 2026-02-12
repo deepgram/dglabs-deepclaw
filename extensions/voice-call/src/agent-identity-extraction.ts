@@ -23,31 +23,6 @@ type AgentIdentityFile = {
   avatar?: string;
 };
 
-// Fallback name pool — used when extraction returns a generic name or nothing.
-// These are distinctive, unusual names that feel personal rather than robotic.
-const NAME_POOL = [
-  "Birch",
-  "Flint",
-  "Wren",
-  "Sable",
-  "Moss",
-  "Fern",
-  "Dusk",
-  "Bramble",
-  "Pebble",
-  "Ember",
-  "Lark",
-  "Rust",
-  "Cove",
-  "Tide",
-  "Rue",
-  "Sorrel",
-  "Haze",
-  "Briar",
-  "Soot",
-  "Vale",
-];
-
 // Names that indicate the model didn't actually pick something personal.
 const GENERIC_NAMES = new Set([
   "voice agent",
@@ -197,9 +172,10 @@ export async function extractAgentIdentityFromCall(
     `- "creature": How the agent described what it is (e.g. "AI assistant", "voice companion")`,
     `- "vibe": The agent's personality/tone (e.g. "casual and warm", "direct and helpful")`,
     `- "emoji": Any emoji the agent associated with itself\n`,
-    `Only include fields supported by clear evidence in the transcript.`,
-    `Do NOT guess or infer values not in the conversation.`,
-    `The "name" field is the most important — extract it if the agent introduced itself by name.`,
+    `The "name" field is the most important:`,
+    `- If the agent introduced itself by name or the caller gave it a name, use that.`,
+    `- If no name was established, PICK a distinctive, personal name — something like "Wren", "Ember", "Moss", "Sable". Not generic like "Assistant" or "AI".`,
+    `For other fields, only include them if supported by clear evidence in the transcript.`,
     `Return valid JSON only, no markdown.\n`,
     `Transcript:\n${transcriptText}`,
   ].join("\n");
@@ -287,13 +263,13 @@ export async function extractAgentIdentityFromCall(
       extractedIdentity.emoji = extracted.emoji.trim();
     }
 
-    // Fallback: if extraction returned a generic name (or no name), pick from the pool
-    if (!extractedIdentity.name || GENERIC_NAMES.has(extractedIdentity.name.toLowerCase())) {
-      const fallbackName = NAME_POOL[Math.floor(Math.random() * NAME_POOL.length)]!;
+    // Strip generic names — the LLM should have picked something distinctive,
+    // but clear it out if it still returned something generic.
+    if (extractedIdentity.name && GENERIC_NAMES.has(extractedIdentity.name.toLowerCase())) {
       console.log(
-        `[voice-call] Agent identity extraction: name "${extractedIdentity.name ?? ""}" is generic/empty, falling back to "${fallbackName}"`,
+        `[voice-call] Agent identity extraction: name "${extractedIdentity.name}" is generic, discarding`,
       );
-      extractedIdentity.name = fallbackName;
+      delete extractedIdentity.name;
     }
 
     if (!identityHasValues(extractedIdentity)) {
