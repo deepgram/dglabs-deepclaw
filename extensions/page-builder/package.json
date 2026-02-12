@@ -1,0 +1,17 @@
+{
+  "name": "@openclaw/page-builder",
+  "version": "2026.2.6-3",
+  "description": "Agent-driven page builder with block-schema rendering and live reload",
+  "type": "module",
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.2.6"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
