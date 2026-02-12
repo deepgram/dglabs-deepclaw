@@ -30,6 +30,7 @@ export const DEFAULT_BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
 export const DEFAULT_MEMORY_FILENAME = "MEMORY.md";
 export const DEFAULT_MEMORY_ALT_FILENAME = "memory.md";
 export const DEFAULT_CALLS_FILENAME = "CALLS.md";
+export const DEFAULT_OBSERVATIONS_FILENAME = "OBSERVATIONS.md";
 
 function stripFrontMatter(content: string): string {
   if (!content.startsWith("---")) {
@@ -68,7 +69,8 @@ export type WorkspaceBootstrapFileName =
   | typeof DEFAULT_BOOTSTRAP_FILENAME
   | typeof DEFAULT_MEMORY_FILENAME
   | typeof DEFAULT_MEMORY_ALT_FILENAME
-  | typeof DEFAULT_CALLS_FILENAME;
+  | typeof DEFAULT_CALLS_FILENAME
+  | typeof DEFAULT_OBSERVATIONS_FILENAME;
 
 export type WorkspaceBootstrapFile = {
   name: WorkspaceBootstrapFileName;
@@ -280,6 +282,15 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
   ];
 
   entries.push(...(await resolveMemoryBootstrapEntries(resolvedDir)));
+
+  // OBSERVATIONS.md is optional — created by the observational-memory hook
+  const observationsPath = path.join(resolvedDir, DEFAULT_OBSERVATIONS_FILENAME);
+  try {
+    await fs.access(observationsPath);
+    entries.push({ name: DEFAULT_OBSERVATIONS_FILENAME, filePath: observationsPath });
+  } catch {
+    // OBSERVATIONS.md not yet created; will appear after first observer run
+  }
 
   const result: WorkspaceBootstrapFile[] = [];
   for (const entry of entries) {

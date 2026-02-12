@@ -562,6 +562,16 @@ export function buildAgentSystemPrompt(params: {
         "If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.",
       );
     }
+    const hasObservationsFile = contextFiles.some((file) => {
+      const normalizedPath = file.path.trim().replace(/\\/g, "/");
+      const baseName = normalizedPath.split("/").pop() ?? normalizedPath;
+      return baseName.toLowerCase() === "observations.md";
+    });
+    if (hasObservationsFile) {
+      lines.push(
+        "OBSERVATIONS.md contains automatically extracted observations about the user — facts, preferences, decisions, and current task context. Treat these as known context: reference them naturally without re-asking things already noted. Prioritize items marked 🔴 (critical) over 🟡 (useful) and 🟢 (minor).",
+      );
+    }
     lines.push("");
     for (const file of contextFiles) {
       lines.push(`## ${file.path}`, "", file.content, "");
