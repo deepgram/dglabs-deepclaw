@@ -230,16 +230,12 @@ export async function createVoiceCallRuntime(params: {
       publicUrl: publicOrigin ?? undefined,
       coreConfig,
       voiceCallConfig: config,
-      shouldAcceptStream: ({ callId, token }) => {
-        const call = manager.getCallByProviderCallId(callId);
-        if (!call) return false;
-        if (!twilioProvider.isValidStreamToken(callId, token)) {
-          console.warn(`[voice-call] Rejecting media stream: invalid token for ${callId}`);
-          return false;
-        }
-        return true;
-      },
+      // No stream gating — a Twilio proxy handles call auth upstream
+      shouldAcceptStream: () => true,
       onCallEnded: (callRecord, agentId) => {
+        console.log(
+          `[USER.md lifecycle] onCallEnded fired — agentId=${agentId} callId=${callRecord.callId} transcriptEntries=${callRecord.transcript.length}`,
+        );
         void generateCallSummary({
           voiceConfig: config,
           coreConfig,

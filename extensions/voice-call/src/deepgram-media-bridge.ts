@@ -204,6 +204,11 @@ export class DeepgramMediaBridge {
     }
 
     try {
+      // Ensure a call record exists — streams may arrive without a prior webhook
+      // POST (e.g., when a control plane proxy handles Twilio and forwards the
+      // media stream directly). This creates the record with a default greeting.
+      this.config.manager.ensureCallForStream(callSid);
+
       // Build per-call overrides for gateway integration
       const overrides = await this.buildSessionOverrides(callSid, message);
       const client = await this.config.deepgramProvider.createSession(callSid, callSid, overrides);
@@ -287,8 +292,12 @@ export class DeepgramMediaBridge {
 
       // Speak initial greeting via Deepgram agent (not TwilioProvider.playTts).
       // For notify-mode calls, schedule auto-hangup once the agent finishes speaking.
+      console.log(`[DeepgramBridge] Scheduling greeting injection in 500ms for call=${callSid}`);
       setTimeout(() => {
         const call = this.config.manager.getCallByProviderCallId(callSid);
+        console.log(
+          `[DeepgramBridge] Greeting timer fired for call=${callSid}: callFound=${!!call} hasMetadata=${!!call?.metadata} initialMessage=${JSON.stringify(call?.metadata?.initialMessage)} callState=${call?.state}`,
+        );
         const initialMessage =
           typeof call?.metadata?.initialMessage === "string"
             ? call.metadata.initialMessage.trim()
@@ -297,7 +306,7 @@ export class DeepgramMediaBridge {
           const mode = (call.metadata.mode as string) ?? "conversation";
           delete call.metadata.initialMessage;
           console.log(
-            `[DeepgramBridge] Injecting initial greeting via Deepgram agent (mode=${mode}): "${initialMessage}"`,
+            `[DeepgramBridge] Injecting initial greeting via Deepgram agent (mode=${mode}, length=${initialMessage.length}): "${initialMessage.substring(0, 80)}"`,
           );
           client.injectAgentMessage(initialMessage);
 
@@ -319,6 +328,10 @@ export class DeepgramMediaBridge {
               }, delaySec * 1000);
             });
           }
+        } else {
+          console.log(
+            `[DeepgramBridge] No greeting to inject for call=${callSid}: initialMessage=${JSON.stringify(initialMessage) || "(empty)"} hasMetadata=${!!call?.metadata}`,
+          );
         }
       }, 500);
 
@@ -377,6 +390,9 @@ export class DeepgramMediaBridge {
       if (this.config.coreConfig) {
         const deps = await loadCoreAgentDeps();
         const workspaceDir = deps.resolveAgentWorkspaceDir(this.config.coreConfig, agentId);
+        console.log(
+          `[USER.md lifecycle] buildSessionOverrides — loading USER.md for agentId=${agentId} workspace=${workspaceDir}`,
+        );
 
         // Parse USER.md with proper parser
         const userMdPath = `${workspaceDir}/USER.md`;
@@ -384,6 +400,9 @@ export class DeepgramMediaBridge {
           const userMd = await fs.readFile(userMdPath, "utf-8");
           const userProfile = parseUserMarkdown(userMd);
           callerName = userProfile.callName || userProfile.name;
+          console.log(
+            `[USER.md lifecycle] READ USER.md at call start — callerName=${callerName ?? "(none)"} notes=${userProfile.notes ? "yes" : "(empty)"} context=${userProfile.context ? "yes" : "(empty)"} raw=${userMd.length} chars`,
+          );
           if (callerName) {
             callerContextLines.push(`The caller's name is ${callerName}. Greet them by name.`);
           }
@@ -394,7 +413,9 @@ export class DeepgramMediaBridge {
             callerContextLines.push(`Context: ${userProfile.context}`);
           }
         } catch {
-          // USER.md not found or unreadable — skip
+          console.log(
+            `[USER.md lifecycle] No USER.md found at ${userMdPath} — first call for this agent`,
+          );
         }
 
         // Parse CALLS.md for rich recent call context
@@ -435,6 +456,9 @@ export class DeepgramMediaBridge {
     }
 
     // Personalize the initial greeting
+    console.log(
+      `[DeepgramBridge] Greeting personalization: callSid=${callSid} hasCall=${!!call} hasMetadata=${!!call?.metadata} initialMessage=${JSON.stringify(call?.metadata?.initialMessage)} callerName=${callerName ?? "(none)"} contextLines=${callerContextLines.length}`,
+    );
     if (call?.metadata?.initialMessage) {
       console.log(
         `[DeepgramBridge] Personalizing greeting: callerName=${callerName ?? "none"} agentName=${agentName} contextLines=${callerContextLines.length}`,
@@ -448,11 +472,21 @@ export class DeepgramMediaBridge {
           `Hey there ${callerName}. How can I help?`,
           `${callerName}, what's up?`,
         ];
-        call.metadata.initialMessage = greetings[Math.floor(Math.random() * greetings.length)];
+        const chosen = greetings[Math.floor(Math.random() * greetings.length)];
+        console.log(`[DeepgramBridge] Personalized greeting for ${callerName}: "${chosen}"`);
+        call.metadata.initialMessage = chosen;
+      } else if (callerContextLines.length === 0) {
+        // First call — establish it's a fresh setup, kick off mutual introductions
+        call.metadata.initialMessage =
+          "Hey! This is a fresh DeepClaw setup, so we're just getting to know each other. What should I call you?";
+        console.log(`[DeepgramBridge] Using first-call greeting (no caller context)`);
       } else {
-        // No caller name yet — fresh instance, set up the getting-to-know-you vibe
-        call.metadata.initialMessage = `Hey there! This is a brand new DeepClaw instance — let's get to know each other. What's your name?`;
+        console.log(`[DeepgramBridge] Keeping default greeting (has context but no callerName)`);
       }
+    } else {
+      console.log(
+        `[DeepgramBridge] No initialMessage on call metadata — skipping greeting personalization`,
+      );
     }
 
     // Build system prompt with voice-specific behavioral instructions only.
@@ -480,6 +514,7 @@ export class DeepgramMediaBridge {
       `If a request is ambiguous or you're unsure what the caller means, ask a quick clarifying question before acting. Don't guess or add requirements they didn't ask for.`,
       `Today is ${localTime}. Always present times in this timezone.`,
       `The caller's phone number is ${callerNumber}.`,
+      `You can send the caller a text message by calling the "message" function tool with action "send", channel "twilio-sms", and target "${callerNumber}". Call the tool directly — do NOT use bash or exec to run "openclaw" commands. When the caller asks you to text them something, actually call the message tool — don't just say you did it.`,
     ];
     if (callerContextLines.length > 0) {
       promptLines.push(...callerContextLines);
@@ -498,16 +533,24 @@ export class DeepgramMediaBridge {
 
     // Per-call session key — each call gets a fresh session.
     // Agent identity persists via workspace files (SOUL.md, IDENTITY.md), not session history.
+    const llmEndpointUrl = `${this.config.publicUrl}/v1/chat/completions`;
+    const llmHeaders: Record<string, string> = {
+      Authorization: `Bearer ${this.config.gatewayToken}`,
+      "x-openclaw-session-key": `agent:${agentId}:voice:${callSid}`,
+      "x-openclaw-agent-id": agentId,
+      ...(process.env.FLY_MACHINE_ID && {
+        "fly-force-instance-id": process.env.FLY_MACHINE_ID,
+      }),
+    };
+    console.log(
+      `[DeepgramBridge] LLM endpoint config: url=${llmEndpointUrl} publicUrl=${this.config.publicUrl} gatewayToken=${this.config.gatewayToken ? this.config.gatewayToken.substring(0, 8) + "..." : "(empty)"} sessionKey=agent:${agentId}:voice:${callSid} flyMachineId=${process.env.FLY_MACHINE_ID ?? "(unset)"}`,
+    );
     return {
       systemPrompt,
       llmProvider: "open_ai",
       llmEndpoint: {
-        url: `${this.config.publicUrl}/v1/chat/completions`,
-        headers: {
-          Authorization: `Bearer ${this.config.gatewayToken}`,
-          "x-openclaw-session-key": `agent:${agentId}:voice:${callSid}`,
-          "x-openclaw-agent-id": agentId,
-        },
+        url: llmEndpointUrl,
+        headers: llmHeaders,
       },
     };
   }

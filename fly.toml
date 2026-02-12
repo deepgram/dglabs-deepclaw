@@ -15,10 +15,10 @@ OPENCLAW_STATE_DIR = "/data"
 NODE_OPTIONS = "--max-old-space-size=1536"
 
 [processes]
-app = "node dist/index.js gateway --allow-unconfigured --port 3000 --bind lan"
+app = "node /app/openclaw.mjs gateway --allow-unconfigured --port 18789 --bind lan --verbose"
 
 [http_service]
-internal_port = 3000
+internal_port = 18789
 force_https = true
 auto_stop_machines = false # Keep running for persistent connections
 auto_start_machines = true

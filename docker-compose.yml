@@ -1,11 +1,15 @@
 services:
   openclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ${OPENCLAW_IMAGE:-openclaw:local}
     user: root
     environment:
       HOME: /home/node
       TERM: xterm-256color
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
       CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY}
       CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY}
@@ -34,32 +38,33 @@ services:
       - "${OPENCLAW_BRIDGE_PORT:-18790}:18790"
       - "${OPENCLAW_VOICE_PORT:-8000}:3334"
     init: true
-    restart: unless-stopped
+    # restart: unless-stopped
     command:
       [
         "node",
         "dist/index.js",
         "gateway",
+        "--allow-unconfigured",
         "--bind",
         "${OPENCLAW_GATEWAY_BIND:-lan}",
         "--port",
         "18789",
       ]
 
-  openclaw-cli:
-    image: ${OPENCLAW_IMAGE:-openclaw:local}
-    environment:
-      HOME: /home/node
-      TERM: xterm-256color
-      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
-      BROWSER: echo
-      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY}
-      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY}
-      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE}
-    volumes:
-      - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
-      - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
-    stdin_open: true
-    tty: true
-    init: true
-    entrypoint: ["node", "dist/index.js"]
+#   openclaw-cli:
+#     image: ${OPENCLAW_IMAGE:-openclaw:local}
+#     environment:
+#       HOME: /home/node
+#       TERM: xterm-256color
+#       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+#       BROWSER: echo
+#       CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY}
+#       CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY}
+#       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE}
+#     volumes:
+#       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
+#       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
+#     stdin_open: true
+#     tty: true
+#     init: true
+#     entrypoint: ["node", "dist/index.js"]

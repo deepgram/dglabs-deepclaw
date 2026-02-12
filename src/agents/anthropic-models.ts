@@ -1,6 +1,11 @@
 import type { ModelDefinitionConfig } from "../config/types.js";
 
-export const ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+export const ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com";
+
+/** Resolve the Anthropic base URL, preferring the env override (e.g. LiteLLM proxy). */
+export function resolveAnthropicBaseUrl(): string {
+  return process.env.ANTHROPIC_BASE_URL?.trim() || ANTHROPIC_DEFAULT_BASE_URL;
+}
 
 // Anthropic uses per-token pricing that varies by model.
 // Set to 0 as costs vary by model; override in models.json for accurate costs.
@@ -83,7 +88,8 @@ export async function discoverAnthropicModels(params: {
   }
 
   try {
-    const response = await fetch(`${ANTHROPIC_BASE_URL}/v1/models`, {
+    const baseUrl = resolveAnthropicBaseUrl();
+    const response = await fetch(`${baseUrl}/v1/models`, {
       headers: {
         "x-api-key": params.apiKey,
         "anthropic-version": "2023-06-01",
