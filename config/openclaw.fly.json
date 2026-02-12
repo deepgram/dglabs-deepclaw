@@ -280,6 +280,10 @@
           "timezone": "America/New_York",
           "inboundPolicy": "open"
         }
+      },
+      "page-builder": {
+        "enabled": true,
+        "config": {}
       }
     }
   }
