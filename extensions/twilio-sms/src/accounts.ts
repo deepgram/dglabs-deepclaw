@@ -28,11 +28,13 @@ export type ResolvedTwilioSmsAccount = {
   accountSid: string | undefined;
   authToken: string | undefined;
   phoneNumber: string | undefined;
+  proxyUrl: string | undefined;
 };
 
 const ENV_ACCOUNT_SID = "TWILIO_ACCOUNT_SID";
 const ENV_AUTH_TOKEN = "TWILIO_AUTH_TOKEN";
 const ENV_PHONE_NUMBER = "TWILIO_PHONE_NUMBER";
+const ENV_PROXY_URL = "TWILIO_SMS_PROXY_URL";
 
 function getChannelSection(cfg: OpenClawConfig): Record<string, unknown> | undefined {
   const raw = cfg.channels?.["twilio-sms"];
@@ -137,6 +139,7 @@ export function resolveTwilioSmsAccount(params: {
   const accountEnabled = merged.enabled !== false;
   const enabled = baseEnabled && accountEnabled;
   const credentials = resolveCredentials({ accountId, account: merged });
+  const proxyUrl = process.env[ENV_PROXY_URL]?.trim() || undefined;
 
   return {
     accountId,
@@ -147,6 +150,7 @@ export function resolveTwilioSmsAccount(params: {
     accountSid: credentials.accountSid,
     authToken: credentials.authToken,
     phoneNumber: credentials.phoneNumber,
+    proxyUrl,
   };
 }
 

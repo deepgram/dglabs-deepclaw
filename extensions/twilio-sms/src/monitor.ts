@@ -408,18 +408,21 @@ async function processInboundMessage(
     if (first.url) {
       try {
         const maxBytes = (account.config.mediaMaxMb ?? 20) * 1024 * 1024;
-        // Twilio media URLs require Basic auth to download
-        const credentials = Buffer.from(`${account.accountSid}:${account.authToken}`).toString(
-          "base64",
-        );
-        const authFetch: typeof fetch = (input, init) =>
-          fetch(input, {
-            ...init,
-            headers: {
-              ...Object.fromEntries(new Headers(init?.headers).entries()),
-              Authorization: `Basic ${credentials}`,
-            },
-          });
+        // Twilio media URLs require Basic auth to download; proxy-hosted URLs don't
+        let authFetch: typeof fetch | undefined;
+        if (account.accountSid && account.authToken) {
+          const credentials = Buffer.from(`${account.accountSid}:${account.authToken}`).toString(
+            "base64",
+          );
+          authFetch = (input, init) =>
+            fetch(input, {
+              ...init,
+              headers: {
+                ...Object.fromEntries(new Headers(init?.headers).entries()),
+                Authorization: `Basic ${credentials}`,
+              },
+            });
+        }
         const loaded = await core.channel.media.fetchRemoteMedia({
           url: first.url,
           maxBytes,

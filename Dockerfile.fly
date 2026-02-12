@@ -65,6 +65,11 @@ RUN timeout 15 node /app/openclaw.mjs gateway --port 18789 --bind lan \
     --allow-unconfigured --verbose --token warmup 2>&1 || true
 USER root
 
+# Save the fully warmed-up state as templates for volume seeding at runtime.
+# At boot the Fly volume is mounted over /home/node/.openclaw, so the image
+# contents there are hidden. The entrypoint seeds from this template copy.
+RUN cp -a /home/node/.openclaw /app/openclaw-templates
+
 # Copy production entrypoint
 COPY entrypoint.fly.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

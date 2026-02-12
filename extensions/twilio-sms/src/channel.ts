@@ -115,13 +115,14 @@ export const twilioSmsPlugin: ChannelPlugin<ResolvedTwilioSmsAccount> = {
         accountId,
         clearBaseFields: ["accountSid", "authToken", "phoneNumber", "webhookPath", "name"],
       }),
-    isConfigured: (account) => account.credentialSource !== "none",
+    isConfigured: (account) => account.credentialSource !== "none" || !!account.proxyUrl,
     describeAccount: (account) => ({
       accountId: account.accountId,
       name: account.name,
       enabled: account.enabled,
-      configured: account.credentialSource !== "none",
+      configured: account.credentialSource !== "none" || !!account.proxyUrl,
       credentialSource: account.credentialSource,
+      proxyMode: !!account.proxyUrl,
     }),
     resolveAllowFrom: ({ cfg, accountId }) =>
       (resolveTwilioSmsAccount({ cfg, accountId }).config.dm?.allowFrom ?? []).map((entry) =>
@@ -138,7 +139,7 @@ export const twilioSmsPlugin: ChannelPlugin<ResolvedTwilioSmsAccount> = {
     normalizeAllowEntry: (entry) => normalizePhone(entry),
     notifyApproval: async ({ cfg, id }) => {
       const account = resolveTwilioSmsAccount({ cfg });
-      if (account.credentialSource === "none") {
+      if (account.credentialSource === "none" && !account.proxyUrl) {
         return;
       }
       const to = normalizePhone(id);
@@ -427,7 +428,7 @@ export const twilioSmsPlugin: ChannelPlugin<ResolvedTwilioSmsAccount> = {
       accountId: account.accountId,
       name: account.name,
       enabled: account.enabled,
-      configured: account.credentialSource !== "none",
+      configured: account.credentialSource !== "none" || !!account.proxyUrl,
       credentialSource: account.credentialSource,
       phoneNumber: account.phoneNumber,
       webhookPath: account.config.webhookPath,
