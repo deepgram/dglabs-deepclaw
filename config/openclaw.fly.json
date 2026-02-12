@@ -250,6 +250,7 @@
               "direction": "both"
             }
           },
+          // TODO: fromNumber is hardcoded — move to env var or remove if Twilio handles routing
           "fromNumber": "+16087057765",
           "deepgram": {
             "stt": {
