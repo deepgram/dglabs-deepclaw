@@ -30,13 +30,7 @@ export async function resolveBootstrapFilesForRun(params: {
 }): Promise<WorkspaceBootstrapFile[]> {
   const sessionKey = params.sessionKey ?? params.sessionId;
   const allFiles = await loadWorkspaceBootstrapFiles(params.workspaceDir);
-  console.log(
-    `[USER.md lifecycle] resolveBootstrapFilesForRun — sessionKey=${sessionKey ?? "(none)"} agentId=${params.agentId ?? "(none)"} workspace=${params.workspaceDir} allFiles=[${allFiles.map((f) => `${f.name}(${f.missing ? "missing" : "ok"})`).join(", ")}]`,
-  );
   let bootstrapFiles = filterBootstrapFilesForSession(allFiles, sessionKey);
-  console.log(
-    `[USER.md lifecycle] After session filter — files=[${bootstrapFiles.map((f) => f.name).join(", ")}]`,
-  );
 
   // Voice-first: if USER.md has real data (e.g. from a phone call),
   // the bootstrap ritual is unnecessary — the agent already knows the user.
@@ -46,15 +40,9 @@ export async function resolveBootstrapFilesForRun(params: {
   if (userFile?.content) {
     const profile = parseUserMarkdown(userFile.content);
     const hasValues = userProfileHasValues(profile);
-    console.log(
-      `[USER.md lifecycle] USER.md found in bootstrap — hasValues=${hasValues} name=${profile.name ?? "(empty)"} callName=${profile.callName ?? "(empty)"}`,
-    );
     if (hasValues) {
       bootstrapFiles = bootstrapFiles.filter((f) => f.name !== DEFAULT_BOOTSTRAP_FILENAME);
-      console.log(`[USER.md lifecycle] Removed BOOTSTRAP.md — user already known`);
     }
-  } else {
-    console.log(`[USER.md lifecycle] No USER.md with content in bootstrap files`);
   }
 
   return applyBootstrapHookOverrides({

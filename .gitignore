@@ -86,7 +86,7 @@ config/*
 
 # Local untracked files
 .local/
-/IDENTITY.md
+IDENTITY.md
 /USER.md
 .tgz
 

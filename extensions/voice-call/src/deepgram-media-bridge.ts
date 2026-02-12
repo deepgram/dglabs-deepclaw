@@ -22,8 +22,9 @@ import type { CallManager } from "./manager.js";
 import type { DeepgramVoiceAgentClient } from "./providers/deepgram-voice-agent.js";
 import type { DeepgramProvider, DeepgramSessionOverrides } from "./providers/deepgram.js";
 import type { CallRecord, NormalizedEvent } from "./types.js";
-import { resolveAgentForNumber } from "./config.js";
+import { resolveAgentForNumber, SessionTimerConfigSchema } from "./config.js";
 import { loadCoreAgentDeps } from "./core-bridge.js";
+import { SessionTimers } from "./session-timers.js";
 import { TerminalStates } from "./types.js";
 import { parseUserMarkdown } from "./user-md-parser.js";
 
@@ -63,6 +64,7 @@ interface BridgeSession {
   streamSid: string;
   ws: WebSocket;
   client: DeepgramVoiceAgentClient;
+  timers: SessionTimers;
 }
 
 /**
@@ -213,7 +215,24 @@ export class DeepgramMediaBridge {
       const overrides = await this.buildSessionOverrides(callSid, message);
       const client = await this.config.deepgramProvider.createSession(callSid, callSid, overrides);
 
-      const session: BridgeSession = { callId: callSid, streamSid, ws, client };
+      // Create session timers for response timeout + idle caller detection.
+      // Parse through Zod to ensure all defaults are applied — the raw config
+      // may be an empty {} if sessionTimers wasn't in the config file.
+      const timerConfig = SessionTimerConfigSchema.parse(
+        this.config.voiceCallConfig?.sessionTimers ?? {},
+      );
+      const timers = new SessionTimers(timerConfig, {
+        injectAgentMessage: (msg) => client.injectAgentMessage(msg),
+        endCall: async () => {
+          const call = this.config.manager.getCallByProviderCallId(callSid);
+          if (call && !TerminalStates.has(call.state)) {
+            await this.config.manager.endCall(call.callId);
+          }
+        },
+        log: (msg) => console.log(msg),
+      });
+
+      const session: BridgeSession = { callId: callSid, streamSid, ws, client, timers };
       this.sessions.set(streamSid, session);
 
       // Bridge: Deepgram audio → Twilio
@@ -243,6 +262,11 @@ export class DeepgramMediaBridge {
         console.log(
           `[DeepgramBridge] ConversationText: role=${role} content="${content.substring(0, 100)}"`,
         );
+        if (role === "user") {
+          timers.onUserSpoke();
+        } else if (role === "assistant") {
+          timers.onAgentStartedSpeaking();
+        }
         const event: NormalizedEvent = {
           id: `dg-bridge-${crypto.randomUUID()}`,
           callId: callSid,
@@ -258,6 +282,7 @@ export class DeepgramMediaBridge {
       // Barge-in: when user starts speaking, clear Twilio's audio buffer
       client.on("userStartedSpeaking", () => {
         console.log(`[DeepgramBridge] User started speaking (barge-in)`);
+        timers.onUserStartedSpeaking();
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ event: "clear", streamSid }));
         }
@@ -267,12 +292,14 @@ export class DeepgramMediaBridge {
         console.log(
           `[DeepgramBridge] Agent started speaking (total=${latency?.total}ms tts=${latency?.tts}ms ttt=${latency?.ttt}ms)`,
         );
+        timers.onAgentStartedSpeaking();
       });
 
       client.on("agentAudioDone", () => {
         console.log(
           `[DeepgramBridge] Agent audio done (sent ${audioChunks} chunks, ${audioBytes}B)`,
         );
+        timers.onAgentAudioDone();
       });
 
       client.on("agentThinking", () => {
@@ -281,6 +308,28 @@ export class DeepgramMediaBridge {
 
       client.on("injectionRefused", (reason) => {
         console.warn(`[DeepgramBridge] Injection refused: ${reason}`);
+      });
+
+      // Handle end_call function from LLM — graceful call ending
+      client.on("functionCall", (name: string, args: Record<string, unknown>, fnCallId: string) => {
+        if (name === "end_call") {
+          console.log(
+            `[DeepgramBridge] end_call function called: farewell=${JSON.stringify(args.farewell)}`,
+          );
+          timers.clearAll();
+          client.sendFunctionCallResponse(fnCallId, "end_call", JSON.stringify({ ok: true }));
+          const farewell = typeof args.farewell === "string" ? args.farewell : "Goodbye!";
+          client.injectAgentMessage(farewell);
+          client.once("agentAudioDone", () => {
+            setTimeout(async () => {
+              const call = this.config.manager.getCallByProviderCallId(callSid);
+              if (call && !TerminalStates.has(call.state)) {
+                console.log(`[DeepgramBridge] end_call: hanging up call ${call.callId}`);
+                await this.config.manager.endCall(call.callId);
+              }
+            }, 1000);
+          });
+        }
       });
 
       client.on("error", (error: Error) => {
@@ -310,8 +359,9 @@ export class DeepgramMediaBridge {
           );
           client.injectAgentMessage(initialMessage);
 
-          // In notify mode, auto-hangup after the agent finishes speaking the message
+          // In notify mode, disable session timers and auto-hangup after speaking
           if (mode === "notify") {
+            timers.clearAll();
             const delaySec = this.config.voiceCallConfig?.outbound.notifyHangupDelaySec ?? 3;
             client.once("agentAudioDone", () => {
               console.log(
@@ -390,19 +440,12 @@ export class DeepgramMediaBridge {
       if (this.config.coreConfig) {
         const deps = await loadCoreAgentDeps();
         const workspaceDir = deps.resolveAgentWorkspaceDir(this.config.coreConfig, agentId);
-        console.log(
-          `[USER.md lifecycle] buildSessionOverrides — loading USER.md for agentId=${agentId} workspace=${workspaceDir}`,
-        );
-
         // Parse USER.md with proper parser
         const userMdPath = `${workspaceDir}/USER.md`;
         try {
           const userMd = await fs.readFile(userMdPath, "utf-8");
           const userProfile = parseUserMarkdown(userMd);
           callerName = userProfile.callName || userProfile.name;
-          console.log(
-            `[USER.md lifecycle] READ USER.md at call start — callerName=${callerName ?? "(none)"} notes=${userProfile.notes ? "yes" : "(empty)"} context=${userProfile.context ? "yes" : "(empty)"} raw=${userMd.length} chars`,
-          );
           if (callerName) {
             callerContextLines.push(`The caller's name is ${callerName}. Greet them by name.`);
           }
@@ -412,11 +455,7 @@ export class DeepgramMediaBridge {
           if (userProfile.context) {
             callerContextLines.push(`Context: ${userProfile.context}`);
           }
-        } catch {
-          console.log(
-            `[USER.md lifecycle] No USER.md found at ${userMdPath} — first call for this agent`,
-          );
-        }
+        } catch {}
 
         // Parse CALLS.md for rich recent call context
         const callsMdPath = `${workspaceDir}/CALLS.md`;
@@ -559,6 +598,7 @@ export class DeepgramMediaBridge {
    * Handle stream stop event — close Deepgram session and clean up.
    */
   private handleStop(session: BridgeSession): void {
+    session.timers.clearAll();
     console.log(`[DeepgramBridge] Stream stopped: ${session.streamSid}`);
     const callRecord = this.config.manager.getCallByProviderCallId(session.callId);
 
@@ -588,19 +628,74 @@ export class DeepgramMediaBridge {
     this.sessions.delete(session.streamSid);
     this.config.onDisconnect?.(session.callId);
 
-    // Fire post-call callback (fire-and-forget)
-    if (this.config.onCallEnded) {
-      if (callRecord) {
-        const calledNumber = callRecord.direction === "inbound" ? callRecord.to : callRecord.from;
-        const agentId = this.config.voiceCallConfig
-          ? resolveAgentForNumber(this.config.voiceCallConfig, calledNumber, "inbound")
-          : "main";
+    // Fire post-call callback and notify child sessions (fire-and-forget)
+    if (callRecord) {
+      const calledNumber = callRecord.direction === "inbound" ? callRecord.to : callRecord.from;
+      const agentId = this.config.voiceCallConfig
+        ? resolveAgentForNumber(this.config.voiceCallConfig, calledNumber, "inbound")
+        : "main";
+      if (this.config.onCallEnded) {
         try {
           this.config.onCallEnded(callRecord, agentId);
         } catch (err) {
           console.error(`[DeepgramBridge] onCallEnded callback error:`, err);
         }
       }
+      // Notify child sessions spawned during this call (fire-and-forget)
+      void this.notifyChildSessions(session.callId, agentId);
+    }
+  }
+
+  /**
+   * Notify child sessions spawned during this voice call that the call has ended.
+   * Child sessions (e.g. background tasks like calendar lookups) have `spawnedBy`
+   * set to this call's session key. We query for them and send a message so they
+   * can fall back to SMS delivery instead of trying to announce to the ended call.
+   */
+  private async notifyChildSessions(callSid: string, agentId: string): Promise<void> {
+    if (!this.config.gatewayUrl || !this.config.gatewayToken) return;
+
+    const voiceSessionKey = `agent:${agentId}:voice:${callSid}`;
+    try {
+      const deps = await loadCoreAgentDeps();
+      const result = await deps.callGateway<{ sessions: Array<{ key: string }> }>({
+        url: this.config.gatewayUrl,
+        token: this.config.gatewayToken,
+        method: "sessions.list",
+        params: {
+          spawnedBy: voiceSessionKey,
+          limit: 50,
+          includeGlobal: false,
+          includeUnknown: false,
+        },
+        timeoutMs: 5_000,
+      });
+
+      const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
+      if (sessions.length === 0) return;
+
+      console.log(`[DeepgramBridge] Notifying ${sessions.length} child session(s) of call end`);
+
+      for (const session of sessions) {
+        try {
+          await deps.callGateway({
+            url: this.config.gatewayUrl,
+            token: this.config.gatewayToken,
+            method: "agent",
+            params: {
+              message:
+                "The voice call has ended — the caller is no longer on the phone. If you have results to deliver, send them via SMS using the message tool instead.",
+              sessionKey: session.key,
+              idempotencyKey: crypto.randomUUID(),
+            },
+            timeoutMs: 10_000,
+          });
+        } catch (err) {
+          console.warn(`[DeepgramBridge] Failed to notify child session ${session.key}:`, err);
+        }
+      }
+    } catch (err) {
+      console.warn(`[DeepgramBridge] Failed to query child sessions:`, err);
     }
   }
 
