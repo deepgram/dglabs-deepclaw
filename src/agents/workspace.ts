@@ -314,10 +314,10 @@ const SUBAGENT_BOOTSTRAP_ALLOWLIST = new Set([DEFAULT_AGENTS_FILENAME, DEFAULT_T
 const VOICE_BOOTSTRAP_ALLOWLIST = new Set([
   DEFAULT_SOUL_FILENAME,
   DEFAULT_IDENTITY_FILENAME,
-  DEFAULT_MEMORY_FILENAME,
   DEFAULT_USER_FILENAME,
   DEFAULT_CALLS_FILENAME,
   DEFAULT_TOOLS_FILENAME,
+  DEFAULT_BOOTSTRAP_FILENAME,
 ]);
 
 export function filterBootstrapFilesForSession(
@@ -325,23 +325,13 @@ export function filterBootstrapFilesForSession(
   sessionKey?: string,
 ): WorkspaceBootstrapFile[] {
   if (!sessionKey) {
-    console.log(`[USER.md lifecycle] filterBootstrapFiles — no sessionKey, returning all files`);
     return files;
   }
   if (isSubagentSessionKey(sessionKey)) {
-    console.log(
-      `[USER.md lifecycle] filterBootstrapFiles — subagent session, using SUBAGENT allowlist`,
-    );
     return files.filter((file) => SUBAGENT_BOOTSTRAP_ALLOWLIST.has(file.name));
   }
   if (isVoiceSessionKey(sessionKey)) {
-    console.log(
-      `[USER.md lifecycle] filterBootstrapFiles — voice session (${sessionKey}), using VOICE allowlist`,
-    );
     return files.filter((file) => VOICE_BOOTSTRAP_ALLOWLIST.has(file.name));
   }
-  console.log(
-    `[USER.md lifecycle] filterBootstrapFiles — regular session (${sessionKey}), returning all files`,
-  );
   return files;
 }
