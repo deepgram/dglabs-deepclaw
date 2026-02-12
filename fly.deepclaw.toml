@@ -1,0 +1,27 @@
+# DeepClaw instance deployment config.
+# Usage: fly deploy . -a deepclaw-instance --config fly.deepclaw.toml
+
+app = "deepclaw-instance"
+primary_region = "sjc"
+
+[build]
+dockerfile = "Dockerfile.fly"
+
+# Voice call webhook server (Deepgram media bridge on port 8000)
+[[services]]
+internal_port = 8000
+protocol = "tcp"
+auto_stop_machines = "suspend"
+auto_start_machines = true
+min_machines_running = 0
+
+[[services.ports]]
+handlers = ["tls", "http"]
+port = 443
+
+[env]
+PUBLIC_URL = "https://deepclaw-instance.fly.dev"
+
+[vm]
+size = "shared-cpu-2x"
+memory = "2048mb"

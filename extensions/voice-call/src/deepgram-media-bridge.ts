@@ -204,6 +204,11 @@ export class DeepgramMediaBridge {
     }
 
     try {
+      // Ensure a call record exists — streams may arrive without a prior webhook
+      // POST (e.g., when a control plane proxy handles Twilio and forwards the
+      // media stream directly). This creates the record with a default greeting.
+      this.config.manager.ensureCallForStream(callSid);
+
       // Build per-call overrides for gateway integration
       const overrides = await this.buildSessionOverrides(callSid, message);
       const client = await this.config.deepgramProvider.createSession(callSid, callSid, overrides);
@@ -287,8 +292,12 @@ export class DeepgramMediaBridge {
 
       // Speak initial greeting via Deepgram agent (not TwilioProvider.playTts).
       // For notify-mode calls, schedule auto-hangup once the agent finishes speaking.
+      console.log(`[DeepgramBridge] Scheduling greeting injection in 500ms for call=${callSid}`);
       setTimeout(() => {
         const call = this.config.manager.getCallByProviderCallId(callSid);
+        console.log(
+          `[DeepgramBridge] Greeting timer fired for call=${callSid}: callFound=${!!call} hasMetadata=${!!call?.metadata} initialMessage=${JSON.stringify(call?.metadata?.initialMessage)} callState=${call?.state}`,
+        );
         const initialMessage =
           typeof call?.metadata?.initialMessage === "string"
             ? call.metadata.initialMessage.trim()
@@ -297,7 +306,7 @@ export class DeepgramMediaBridge {
           const mode = (call.metadata.mode as string) ?? "conversation";
           delete call.metadata.initialMessage;
           console.log(
-            `[DeepgramBridge] Injecting initial greeting via Deepgram agent (mode=${mode})`,
+            `[DeepgramBridge] Injecting initial greeting via Deepgram agent (mode=${mode}, length=${initialMessage.length}): "${initialMessage.substring(0, 80)}"`,
           );
           client.injectAgentMessage(initialMessage);
 
@@ -319,6 +328,10 @@ export class DeepgramMediaBridge {
               }, delaySec * 1000);
             });
           }
+        } else {
+          console.log(
+            `[DeepgramBridge] No greeting to inject for call=${callSid}: initialMessage=${JSON.stringify(initialMessage) || "(empty)"} hasMetadata=${!!call?.metadata}`,
+          );
         }
       }, 500);
 
@@ -377,6 +390,9 @@ export class DeepgramMediaBridge {
       if (this.config.coreConfig) {
         const deps = await loadCoreAgentDeps();
         const workspaceDir = deps.resolveAgentWorkspaceDir(this.config.coreConfig, agentId);
+        console.log(
+          `[USER.md lifecycle] buildSessionOverrides — loading USER.md for agentId=${agentId} workspace=${workspaceDir}`,
+        );
 
         // Parse USER.md with proper parser
         const userMdPath = `${workspaceDir}/USER.md`;
@@ -384,6 +400,9 @@ export class DeepgramMediaBridge {
           const userMd = await fs.readFile(userMdPath, "utf-8");
           const userProfile = parseUserMarkdown(userMd);
           callerName = userProfile.callName || userProfile.name;
+          console.log(
+            `[USER.md lifecycle] READ USER.md at call start — callerName=${callerName ?? "(none)"} notes=${userProfile.notes ? "yes" : "(empty)"} context=${userProfile.context ? "yes" : "(empty)"} raw=${userMd.length} chars`,
+          );
           if (callerName) {
             callerContextLines.push(`The caller's name is ${callerName}. Greet them by name.`);
           }
@@ -394,7 +413,9 @@ export class DeepgramMediaBridge {
             callerContextLines.push(`Context: ${userProfile.context}`);
           }
         } catch {
-          // USER.md not found or unreadable — skip
+          console.log(
+            `[USER.md lifecycle] No USER.md found at ${userMdPath} — first call for this agent`,
+          );
         }
 
         // Parse CALLS.md for rich recent call context
@@ -408,11 +429,26 @@ export class DeepgramMediaBridge {
               callerContextLines.push(`- ${entry}`);
             }
             callerContextLines.push(
-              `Reference ONE specific detail from a recent call naturally within the first 15 seconds. Keep it casual — not a data dump.`,
+              `Within the first 15 seconds, casually reference ONE specific detail from a recent interaction — a call topic, something they texted about, a question from another channel. Like a friend checking in, not a data readback.`,
+              `Within the first 45 seconds, naturally steer toward offering a concrete action — send a text, set a reminder, look something up. Frame it as a natural offer ("Want me to text you that?"), not a feature pitch. If they already asked for something, just do it.`,
             );
           }
         } catch {
           // CALLS.md not found — skip
+        }
+
+        // Load cross-channel context (SMS, Slack, web chat, etc.)
+        try {
+          const storePath = deps.resolveStorePath(this.config.coreConfig?.session?.store, {
+            agentId,
+          });
+          const sessions = loadRecentNonVoiceSessions(deps.loadSessionStore(storePath));
+          const briefing = buildCrossChannelBriefing(sessions);
+          if (briefing) {
+            callerContextLines.push(briefing);
+          }
+        } catch {
+          // Non-critical — fall through silently
         }
       }
     } catch (err) {
@@ -420,7 +456,13 @@ export class DeepgramMediaBridge {
     }
 
     // Personalize the initial greeting
+    console.log(
+      `[DeepgramBridge] Greeting personalization: callSid=${callSid} hasCall=${!!call} hasMetadata=${!!call?.metadata} initialMessage=${JSON.stringify(call?.metadata?.initialMessage)} callerName=${callerName ?? "(none)"} contextLines=${callerContextLines.length}`,
+    );
     if (call?.metadata?.initialMessage) {
+      console.log(
+        `[DeepgramBridge] Personalizing greeting: callerName=${callerName ?? "none"} agentName=${agentName} contextLines=${callerContextLines.length}`,
+      );
       if (callerName) {
         const greetings = [
           `Hey ${callerName}! What's going on?`,
@@ -430,12 +472,21 @@ export class DeepgramMediaBridge {
           `Hey there ${callerName}. How can I help?`,
           `${callerName}, what's up?`,
         ];
-        call.metadata.initialMessage = greetings[Math.floor(Math.random() * greetings.length)];
+        const chosen = greetings[Math.floor(Math.random() * greetings.length)];
+        console.log(`[DeepgramBridge] Personalized greeting for ${callerName}: "${chosen}"`);
+        call.metadata.initialMessage = chosen;
       } else if (callerContextLines.length === 0) {
         // First call — establish it's a fresh setup, kick off mutual introductions
         call.metadata.initialMessage =
           "Hey! This is a fresh DeepClaw setup, so we're just getting to know each other. What should I call you?";
+        console.log(`[DeepgramBridge] Using first-call greeting (no caller context)`);
+      } else {
+        console.log(`[DeepgramBridge] Keeping default greeting (has context but no callerName)`);
       }
+    } else {
+      console.log(
+        `[DeepgramBridge] No initialMessage on call metadata — skipping greeting personalization`,
+      );
     }
 
     // Build system prompt with voice-specific behavioral instructions only.
@@ -463,35 +514,43 @@ export class DeepgramMediaBridge {
       `If a request is ambiguous or you're unsure what the caller means, ask a quick clarifying question before acting. Don't guess or add requirements they didn't ask for.`,
       `Today is ${localTime}. Always present times in this timezone.`,
       `The caller's phone number is ${callerNumber}.`,
+      `You can send the caller a text message by calling the "message" function tool with action "send", channel "twilio-sms", and target "${callerNumber}". Call the tool directly — do NOT use bash or exec to run "openclaw" commands. When the caller asks you to text them something, actually call the message tool — don't just say you did it.`,
     ];
     if (callerContextLines.length > 0) {
       promptLines.push(...callerContextLines);
     } else {
       // First call — no USER.md data, no CALLS.md. Guide the onboarding.
-      const nameLabel = agentName !== "Assistant" ? agentName : "your AI voice assistant";
       promptLines.push(
         `This is a brand new setup — you've never spoken with this caller before.`,
-        `Introduce yourself as ${nameLabel}. Be warm and confident, not robotic.`,
-        `Within the first exchange, naturally ask what they'd like you to call them.`,
-        `Give a brief taste of what you can do — answer questions, help think through problems, look things up, set reminders, make calls. Keep it to one or two examples, don't list everything.`,
-        `If you don't have a name yet (IDENTITY.md is blank), pick one that feels right and tell them. Own it.`,
-        `The goal is: by the end of this call, you know each other's names and the caller has a feel for what you're about.`,
+        `You don't have a name yet — that's fine. Don't try to pick one or announce one. If the caller asks your name, say you haven't picked one yet and you're open to suggestions. Your name will be figured out after the call.`,
+        `Within the first exchange, naturally ask their name if you don't have it yet.`,
+        `IMPORTANT: When someone says "call me [name]" or "you can call me [name]", they are telling you their NAME — they want to be addressed as that name. This is NOT a request to make a phone call. Respond by confirming the name, e.g. "Got it, [name]."`,
+        `Show what you can do by offering to DO something right now — "Want me to look something up and text it to you?" or "I can set a reminder if you need one." One real action beats a list of capabilities.`,
+        `The goal is: by the end of this call, you know each other's names, the caller has seen you do something useful, and they have a reason to call back.`,
       );
     }
     const systemPrompt = promptLines.join("\n");
 
     // Per-call session key — each call gets a fresh session.
     // Agent identity persists via workspace files (SOUL.md, IDENTITY.md), not session history.
+    const llmEndpointUrl = `${this.config.publicUrl}/v1/chat/completions`;
+    const llmHeaders: Record<string, string> = {
+      Authorization: `Bearer ${this.config.gatewayToken}`,
+      "x-openclaw-session-key": `agent:${agentId}:voice:${callSid}`,
+      "x-openclaw-agent-id": agentId,
+      ...(process.env.FLY_MACHINE_ID && {
+        "fly-force-instance-id": process.env.FLY_MACHINE_ID,
+      }),
+    };
+    console.log(
+      `[DeepgramBridge] LLM endpoint config: url=${llmEndpointUrl} publicUrl=${this.config.publicUrl} gatewayToken=${this.config.gatewayToken ? this.config.gatewayToken.substring(0, 8) + "..." : "(empty)"} sessionKey=agent:${agentId}:voice:${callSid} flyMachineId=${process.env.FLY_MACHINE_ID ?? "(unset)"}`,
+    );
     return {
       systemPrompt,
       llmProvider: "open_ai",
       llmEndpoint: {
-        url: `${this.config.publicUrl}/v1/chat/completions`,
-        headers: {
-          Authorization: `Bearer ${this.config.gatewayToken}`,
-          "x-openclaw-session-key": `agent:${agentId}:voice:${callSid}`,
-          "x-openclaw-agent-id": agentId,
-        },
+        url: llmEndpointUrl,
+        headers: llmHeaders,
       },
     };
   }
@@ -579,11 +638,106 @@ export class DeepgramMediaBridge {
 /**
  * Extract the most recent call entries from CALLS.md content.
  * Each entry starts with `### ` (h3 heading). Returns the last `count` entries
- * as single-line summaries (heading text only, trimmed).
+ * with heading + body summary (trimmed to ~150 chars to keep prompt budget manageable).
  */
 function getRecentCallEntries(callsMd: string, count: number): string[] {
   const parts = callsMd.split(/(?=^### )/m).slice(1); // skip content before first entry
-  return parts.slice(-count).map((entry) => entry.replace(/^### /, "").split("\n")[0]!.trim());
+  return parts.slice(-count).map((entry) => {
+    const lines = entry.split("\n").filter((l) => l.trim());
+    const heading = lines[0]!.replace(/^### /, "").trim();
+    const body = lines.slice(1).join(" ").trim();
+    const summary = body.length > 150 ? body.slice(0, 147) + "..." : body;
+    return summary ? `${heading}: ${summary}` : heading;
+  });
+}
+
+/**
+ * Session entry shape from loadSessionStore() — minimal subset for cross-channel loading.
+ */
+interface SessionStoreEntry {
+  updatedAt?: number;
+  lastChannel?: string;
+  channel?: string;
+  displayName?: string;
+  subject?: string;
+  label?: string;
+}
+
+/**
+ * Map channel identifiers to human-readable labels for voice context.
+ */
+function formatChannelLabel(channel: string): string {
+  const labels: Record<string, string> = {
+    "twilio-sms": "SMS",
+    whatsapp: "WhatsApp",
+    telegram: "Telegram",
+    discord: "Discord",
+    slack: "Slack",
+    signal: "Signal",
+    imessage: "iMessage",
+    googlechat: "Google Chat",
+    webchat: "web chat",
+  };
+  return labels[channel] ?? channel;
+}
+
+/**
+ * Format a timestamp as a human-friendly relative time string.
+ */
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 60) return minutes <= 1 ? "just now" : `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
+  return `${days} days ago`;
+}
+
+/**
+ * Filter session store to recent non-voice sessions for cross-channel context.
+ * Excludes voice calls (already in CALLS.md), call summaries, and internal sessions.
+ * Returns the 5 most recent sessions updated within the last 7 days.
+ */
+function loadRecentNonVoiceSessions(
+  store: Record<string, unknown>,
+): Array<{ key: string; channel: string; title: string; updatedAt: number }> {
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const results: Array<{ key: string; channel: string; title: string; updatedAt: number }> = [];
+
+  for (const [key, raw] of Object.entries(store)) {
+    // Skip voice calls, call summaries, and internal sessions
+    if (key.includes(":voice:") || key.includes(":call-summary:")) continue;
+    if (key.startsWith("cron:") || key.startsWith("hook:") || key.startsWith("node:")) continue;
+
+    const entry = raw as SessionStoreEntry;
+    if (!entry.updatedAt || entry.updatedAt < sevenDaysAgo) continue;
+
+    const channel = entry.lastChannel || entry.channel;
+    if (!channel) continue;
+
+    const title = entry.displayName || entry.subject || entry.label || "";
+    if (!title) continue;
+
+    results.push({ key, channel, title, updatedAt: entry.updatedAt });
+  }
+
+  return results.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
+}
+
+/**
+ * Build a concise cross-channel briefing block for the voice system prompt.
+ * Returns undefined if there are no relevant sessions.
+ */
+function buildCrossChannelBriefing(
+  sessions: Array<{ channel: string; title: string; updatedAt: number }>,
+): string | undefined {
+  if (sessions.length === 0) return undefined;
+  const lines = sessions.map(
+    (s) => `- ${formatChannelLabel(s.channel)} (${formatRelativeTime(s.updatedAt)}): ${s.title}`,
+  );
+  return `Recent conversations on other channels:\n${lines.join("\n")}`;
 }
 
 /**

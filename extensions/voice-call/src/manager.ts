@@ -574,6 +574,23 @@ export class CallManager {
   }
 
   /**
+   * Ensure a call record exists for a media stream connection.
+   * If no record exists for the given provider call ID, creates one.
+   * Used when streams arrive without a prior webhook POST (e.g., proxied via control plane).
+   */
+  ensureCallForStream(providerCallId: string, params?: { from?: string; to?: string }): CallRecord {
+    const existing = this.getCallByProviderCallId(providerCallId);
+    if (existing) {
+      return existing;
+    }
+    return this.createInboundCall(
+      providerCallId,
+      params?.from || "unknown",
+      params?.to || "unknown",
+    );
+  }
+
+  /**
    * Look up a call by either internal callId or providerCallId.
    */
   private findCall(callIdOrProviderCallId: string): CallRecord | undefined {
@@ -664,6 +681,7 @@ export class CallManager {
         break;
 
       case "call.speaking":
+        this.addTranscriptEntry(call, "bot", event.text);
         this.transitionState(call, "speaking");
         break;
 

@@ -4,9 +4,14 @@ import type { PluginServicesHandle } from "../plugins/services.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { ControlUiRootState } from "./control-ui.js";
 import type { startBrowserControlServerIfEnabled } from "./server-browser.js";
-import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import {
+  listAgentIds,
+  resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
+} from "../agents/agent-scope.js";
 import { registerSkillsChangeListener } from "../agents/skills/refresh.js";
 import { initSubagentRegistry } from "../agents/subagent-registry.js";
+import { ensureAgentWorkspace } from "../agents/workspace.js";
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { createDefaultDeps } from "../cli/deps.js";
@@ -159,6 +164,7 @@ export async function startGatewayServer(
 ): Promise<GatewayServer> {
   // Ensure all default port derivations (browser/canvas) see the actual runtime port.
   process.env.OPENCLAW_GATEWAY_PORT = String(port);
+  process.env.OPENCLAW_GATEWAY_LOOPBACK = "1";
   logAcceptedEnvOption({
     key: "OPENCLAW_RAW_STREAM",
     description: "raw stream logging enabled",
@@ -227,6 +233,21 @@ export async function startGatewayServer(
   initSubagentRegistry();
   const defaultAgentId = resolveDefaultAgentId(cfgAtStart);
   const defaultWorkspaceDir = resolveAgentWorkspaceDir(cfgAtStart, defaultAgentId);
+
+  // Ensure bootstrap files exist for all configured agents (not just the default).
+  // This runs once at startup so that agent workspaces defined in openclaw.json
+  // have their AGENTS.md, USER.md, SOUL.md, etc. ready before the first message.
+  const skipBootstrap = Boolean(cfgAtStart.agents?.defaults?.skipBootstrap);
+  if (!skipBootstrap) {
+    const agentIds = listAgentIds(cfgAtStart);
+    for (const id of agentIds) {
+      const dir = resolveAgentWorkspaceDir(cfgAtStart, id);
+      ensureAgentWorkspace({ dir, ensureBootstrapFiles: true }).catch((err) => {
+        log.warn(`gateway: failed to ensure workspace for agent "${id}": ${String(err)}`);
+      });
+    }
+  }
+
   const baseMethods = listGatewayMethods();
   const { pluginRegistry, gatewayMethods: baseGatewayMethods } = loadGatewayPlugins({
     cfg: cfgAtStart,
@@ -634,6 +655,7 @@ export async function startGatewayServer(
         skillsRefreshTimer = null;
       }
       skillsChangeUnsub();
+      delete process.env.OPENCLAW_GATEWAY_LOOPBACK;
       await close(opts);
     },
   };

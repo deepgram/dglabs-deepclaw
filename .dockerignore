@@ -1,4 +1,5 @@
 .git
+.openclaw
 .worktrees
 .bun-cache
 .bun

@@ -41,12 +41,17 @@ export async function extractUserProfileFromCall(
 ): Promise<void> {
   const { voiceConfig, coreConfig, callRecord, agentId } = params;
 
+  console.log(
+    `[USER.md lifecycle] extractUserProfileFromCall called — agentId=${agentId} callId=${callRecord.callId}`,
+  );
+
   if (!voiceConfig.userProfile.enabled) {
+    console.log(`[USER.md lifecycle] SKIP: userProfile.enabled=false in voiceConfig`);
     return;
   }
 
   if (callRecord.transcript.length === 0) {
-    console.log(`[voice-call] Skipping user profile extraction: no transcript entries`);
+    console.log(`[USER.md lifecycle] SKIP: no transcript entries`);
     return;
   }
 
@@ -59,6 +64,7 @@ export async function extractUserProfileFromCall(
   }
 
   const workspaceDir = deps.resolveAgentWorkspaceDir(coreConfig, agentId);
+  console.log(`[USER.md lifecycle] workspaceDir=${workspaceDir}`);
   await deps.ensureAgentWorkspace({ dir: workspaceDir });
 
   // Read existing USER.md
@@ -66,11 +72,15 @@ export async function extractUserProfileFromCall(
   let existingContent = "";
   try {
     existingContent = await fsp.readFile(userFilePath, "utf-8");
+    console.log(`[USER.md lifecycle] Read existing USER.md (${existingContent.length} chars)`);
   } catch {
-    // File doesn't exist yet — will create from scratch
+    console.log(`[USER.md lifecycle] No existing USER.md — will create from scratch`);
   }
 
   const existingProfile = existingContent ? parseUserMarkdown(existingContent) : {};
+  console.log(
+    `[USER.md lifecycle] Existing profile: name=${existingProfile.name ?? "(empty)"} callName=${existingProfile.callName ?? "(empty)"} timezone=${existingProfile.timezone ?? "(empty)"} notes=${existingProfile.notes ? "yes" : "(empty)"} context=${existingProfile.context ? "yes" : "(empty)"}`,
+  );
 
   // Skip if profile is already fully populated (all non-optional fields set)
   if (
@@ -80,7 +90,7 @@ export async function extractUserProfileFromCall(
     existingProfile.notes &&
     existingProfile.context
   ) {
-    console.log(`[voice-call] Skipping user profile extraction: profile already populated`);
+    console.log(`[USER.md lifecycle] SKIP: profile already fully populated — all fields set`);
     return;
   }
 
@@ -104,6 +114,10 @@ export async function extractUserProfileFromCall(
     `Return valid JSON only, no markdown.\n`,
     `Transcript:\n${transcriptText}`,
   ].join("\n");
+
+  console.log(
+    `[USER.md lifecycle] Sending transcript (${callRecord.transcript.length} entries) to LLM for extraction...`,
+  );
 
   // Resolve model — use same responseModel as voice responses (cheap/fast)
   const modelRef = voiceConfig.responseModel || `${deps.DEFAULT_PROVIDER}/${deps.DEFAULT_MODEL}`;
@@ -145,8 +159,9 @@ export async function extractUserProfileFromCall(
       .filter(Boolean);
 
     const rawResponse = texts.join(" ");
+    console.log(`[USER.md lifecycle] LLM raw response: ${rawResponse.slice(0, 500)}`);
     if (!rawResponse) {
-      console.warn(`[voice-call] User profile extraction: agent returned no text`);
+      console.warn(`[USER.md lifecycle] SKIP: agent returned no text`);
       return;
     }
 
@@ -189,14 +204,24 @@ export async function extractUserProfileFromCall(
       extractedProfile.context = extracted.context.trim();
     }
 
+    console.log(
+      `[USER.md lifecycle] Extracted profile: name=${extractedProfile.name ?? "(empty)"} callName=${extractedProfile.callName ?? "(empty)"} timezone=${extractedProfile.timezone ?? "(empty)"} notes=${extractedProfile.notes ? "yes" : "(empty)"} context=${extractedProfile.context ? "yes" : "(empty)"}`,
+    );
+
     if (!userProfileHasValues(extractedProfile)) {
-      console.log(`[voice-call] User profile extraction: no values extracted from transcript`);
+      console.log(`[USER.md lifecycle] SKIP: no values extracted from transcript`);
       return;
     }
 
     // Merge and write
     const merged = mergeUserProfiles(existingProfile, extractedProfile);
     const serialized = serializeUserMarkdown(merged);
+    console.log(
+      `[USER.md lifecycle] WRITING merged USER.md to ${userFilePath} (${serialized.length} chars)`,
+    );
+    console.log(
+      `[USER.md lifecycle] Merged profile: name=${merged.name ?? "(empty)"} callName=${merged.callName ?? "(empty)"} timezone=${merged.timezone ?? "(empty)"}`,
+    );
     await fsp.writeFile(userFilePath, serialized, "utf-8");
 
     // Clean up ephemeral session file (best-effort)
@@ -215,8 +240,10 @@ export async function extractUserProfileFromCall(
       await deps.saveSessionStore(storePath, sessionStore).catch(() => {});
     }
 
-    console.log(`[voice-call] User profile extracted for ${callRecord.callId}`);
+    console.log(
+      `[USER.md lifecycle] SUCCESS — user profile extracted and written for callId=${callRecord.callId}`,
+    );
   } catch (err) {
-    console.error(`[voice-call] User profile extraction failed:`, err);
+    console.error(`[USER.md lifecycle] FAILED — user profile extraction error:`, err);
   }
 }

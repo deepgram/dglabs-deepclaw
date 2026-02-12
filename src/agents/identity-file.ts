@@ -88,6 +88,17 @@ export function identityHasValues(identity: AgentIdentityFile): boolean {
   );
 }
 
+export function serializeIdentityMarkdown(identity: AgentIdentityFile): string {
+  const lines = [`# IDENTITY.md - Who Am I?`, ``];
+  lines.push(`- **Name:** ${identity.name ?? ""}`);
+  lines.push(`- **Creature:** ${identity.creature ?? ""}`);
+  lines.push(`- **Vibe:** ${identity.vibe ?? ""}`);
+  lines.push(`- **Emoji:** ${identity.emoji ?? ""}`);
+  lines.push(`- **Avatar:** ${identity.avatar ?? ""}`);
+  lines.push(``);
+  return lines.join("\n") + "\n";
+}
+
 export function loadIdentityFromFile(identityPath: string): AgentIdentityFile | null {
   try {
     const content = fs.readFileSync(identityPath, "utf-8");

@@ -232,14 +232,14 @@ export type UserProfileConfig = z.infer<typeof UserProfileConfigSchema>;
 export const VoiceCallServeConfigSchema = z
   .object({
     /** Port to listen on */
-    port: z.number().int().positive().default(3334),
+    port: z.number().int().positive().default(8000),
     /** Bind address */
     bind: z.string().default("127.0.0.1"),
     /** Webhook path */
     path: z.string().min(1).default("/voice/webhook"),
   })
   .strict()
-  .default({ port: 3334, bind: "127.0.0.1", path: "/voice/webhook" });
+  .default({ port: 8000, bind: "127.0.0.1", path: "/voice/webhook" });
 export type VoiceCallServeConfig = z.infer<typeof VoiceCallServeConfigSchema>;
 
 export const VoiceCallTailscaleConfigSchema = z

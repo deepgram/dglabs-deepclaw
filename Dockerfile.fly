@@ -1,0 +1,84 @@
+# Production Dockerfile for DeepClaw instance on Fly.io.
+# Builds from source (dglabs-deepclaw) and adds the production entrypoint
+# that writes config from environment variables at boot.
+#
+# Deploy with:
+#   fly deploy . -a deepclaw-instance --dockerfile Dockerfile.fly
+#   fly machines list -a deepclaw-instance --json | jq -r '.[] | select(.config.metadata.fly_process_group == "app") | .id' | xargs -I{} fly machines destroy {} -a deepclaw-instance --force
+
+FROM node:22-bookworm AS builder
+
+RUN corepack enable
+
+WORKDIR /app
+
+# --- Layer 1: Dependencies (cached until lockfile changes) ---
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY ui/package.json ./ui/package.json
+COPY patches ./patches
+COPY scripts ./scripts
+
+RUN pnpm install --frozen-lockfile
+
+# --- Layer 2: Build config + source (granular copies for better caching) ---
+COPY tsconfig.json tsconfig.plugin-sdk.dts.json tsdown.config.ts ./
+COPY openclaw.mjs ./
+COPY src ./src
+COPY packages ./packages
+COPY ui ./ui
+COPY skills ./skills
+COPY docs ./docs
+COPY CHANGELOG.md LICENSE ./
+
+# --- Layer 3: Extensions (most frequently changed during development) ---
+COPY extensions ./extensions
+
+ENV OPENCLAW_PREFER_PNPM=1
+RUN OPENCLAW_A2UI_SKIP_MISSING=1 pnpm build
+RUN pnpm ui:build
+
+# --- Runtime stage ---
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y \
+    git curl wget ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable
+
+WORKDIR /app
+COPY --from=builder --chown=node:node /app /app
+RUN chown node:node /home/node
+
+ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=768"
+ENV NODE_COMPILE_CACHE=/home/node/.cache/node
+
+# Warm up with the REAL bundled config to pre-generate workspace files
+# (AGENTS.md, SOUL.md, USER.md, TOOLS.md, IDENTITY.md, HEARTBEAT.md, etc.)
+USER node
+RUN mkdir -p /home/node/.openclaw
+COPY --chown=node:node config/openclaw.fly.json /home/node/.openclaw/openclaw.json
+COPY --chown=node:node data/workspace /home/node/.openclaw/workspace
+COPY --chown=node:node data/workspace /home/node/.openclaw/workspace/voice-agent
+RUN timeout 15 node /app/openclaw.mjs gateway --port 18789 --bind lan \
+    --allow-unconfigured --verbose --token warmup 2>&1 || true
+USER root
+
+# Copy production entrypoint
+COPY entrypoint.fly.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 18789
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
+    CMD node /app/openclaw.mjs gateway health --url ws://localhost:18789 --timeout 5000 || exit 1
+
+ENV PUBLIC_URL="https://deepclaw-instance.fly.dev"
+
+USER node
+WORKDIR /home/node
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/sh", "-c", "exec node /app/openclaw.mjs gateway --port 18789 --bind lan --allow-unconfigured --verbose --token \"$OPENCLAW_GATEWAY_TOKEN\""]
