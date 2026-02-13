@@ -1,10 +1,14 @@
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import date
+import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.sms_context import FALLBACK_MESSAGE, HOLDING_MESSAGE
+
+_NO_USER_MD = patch("app.services.sms_context.USER_MD_PATH", Path("/nonexistent/USER.md"))
 
 
 @pytest.fixture
@@ -12,25 +16,11 @@ def client():
     return TestClient(app)
 
 
-def _mock_openclaw_response(content: str):
-    """Build a mock httpx.Response for OpenClaw chat completions."""
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
-        "choices": [{"message": {"content": content}}]
-    }
-    mock_resp.raise_for_status = MagicMock()
-    return mock_resp
-
-
 def test_inbound_sms_routes_through_openclaw(client):
-    mock_resp = _mock_openclaw_response("Hello from OpenClaw!")
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_resp
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
-    with patch("app.routers.sms.httpx.AsyncClient", return_value=mock_client):
+    with (
+        patch("app.routers.sms.ask_openclaw", AsyncMock(return_value="Hello from OpenClaw!")),
+        _NO_USER_MD,
+    ):
         response = client.post(
             "/twilio/inbound-sms",
             data={"From": "+15551234567", "Body": "hello", "MessageSid": "SM123"},
@@ -40,33 +30,18 @@ def test_inbound_sms_routes_through_openclaw(client):
     assert response.headers["content-type"] == "application/xml"
     assert "<Message>Hello from OpenClaw!</Message>" in response.text
 
-    # Verify the call to OpenClaw
-    mock_client.post.assert_called_once()
-    call_args = mock_client.post.call_args
-    assert call_args[0][0] == "http://localhost:18789/v1/chat/completions"
-    headers = call_args[1]["headers"]
-    assert headers["Authorization"] == "Bearer test-token"
-    assert headers["x-openclaw-session-key"].startswith("agent:main:sms-")
-    body = call_args[1]["json"]
-    assert body["messages"][0]["role"] == "user"
-    assert body["messages"][0]["content"] == "hello"
-
 
 def test_inbound_mms_image_sent_as_multimodal(client):
-    """MMS with image should send multimodal content to OpenClaw."""
-    mock_resp = _mock_openclaw_response("Nice photo!")
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_resp
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
+    """MMS with image should pass multimodal content through to ask_openclaw."""
+    mock_ask = AsyncMock(return_value="Nice photo!")
     fake_content = [
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}},
     ]
 
     with (
-        patch("app.routers.sms.httpx.AsyncClient", return_value=mock_client),
-        patch("app.routers.sms.build_message_content", return_value=fake_content),
+        patch("app.routers.sms.ask_openclaw", mock_ask),
+        patch("app.routers.sms.build_message_content", AsyncMock(return_value=fake_content)),
+        _NO_USER_MD,
     ):
         response = client.post(
             "/twilio/inbound-sms",
@@ -83,26 +58,60 @@ def test_inbound_mms_image_sent_as_multimodal(client):
     assert response.status_code == 200
     assert "<Message>Nice photo!</Message>" in response.text
 
-    # Verify multimodal content was forwarded to OpenClaw
-    call_args = mock_client.post.call_args
-    content = call_args[1]["json"]["messages"][0]["content"]
-    assert isinstance(content, list)
-    assert len(content) == 1
-    assert content[0]["type"] == "image_url"
+    # Verify multimodal content was forwarded to ask_openclaw
+    call_args = mock_ask.call_args
+    assert call_args[0][2] is fake_content
 
 
 def test_inbound_sms_openclaw_error_returns_fallback(client):
-    mock_client = AsyncMock()
-    mock_client.post.side_effect = Exception("connection refused")
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
-    with patch("app.routers.sms.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.routers.sms.ask_openclaw", AsyncMock(side_effect=Exception("connection refused"))):
         response = client.post(
             "/twilio/inbound-sms",
             data={"From": "+15551234567", "Body": "hello", "MessageSid": "SM123"},
         )
 
     assert response.status_code == 200
-    assert "<Message>" in response.text
-    # Should contain a fallback message, not crash
+    assert FALLBACK_MESSAGE in response.text
+
+
+def test_inbound_sms_timeout_sends_holding_then_delayed(client):
+    """When OpenClaw exceeds the reply timeout, return holding message and fire delayed reply."""
+
+    async def _slow(*a, **kw):
+        await asyncio.sleep(10)
+        return "Late response"
+
+    mock_delayed = AsyncMock()
+
+    with (
+        patch("app.routers.sms.ask_openclaw", side_effect=_slow),
+        patch("app.routers.sms.TWILIO_REPLY_TIMEOUT", 0.01),
+        patch("app.routers.sms.send_delayed_reply", mock_delayed),
+    ):
+        response = client.post(
+            "/twilio/inbound-sms",
+            data={"From": "+15551234567", "Body": "long question", "MessageSid": "SM999"},
+        )
+
+    assert response.status_code == 200
+    assert HOLDING_MESSAGE in response.text
+    mock_delayed.assert_called_once()
+
+
+def test_inbound_sms_long_reply_truncated(client):
+    """Replies longer than 1600 chars should be truncated."""
+    long_reply = "A" * 800 + ".\n" + "B" * 900
+
+    with (
+        patch("app.routers.sms.ask_openclaw", AsyncMock(return_value=long_reply)),
+        _NO_USER_MD,
+    ):
+        response = client.post(
+            "/twilio/inbound-sms",
+            data={"From": "+15551234567", "Body": "tell me everything", "MessageSid": "SM888"},
+        )
+
+    assert response.status_code == 200
+    # Should have truncated at the newline
+    assert "BBBBB" not in response.text
+    assert "AAAAA" in response.text

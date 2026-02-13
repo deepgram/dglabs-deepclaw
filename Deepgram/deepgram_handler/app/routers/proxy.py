@@ -1,20 +1,25 @@
 """Proxy router: receive forwarded Twilio SMS from deepclaw-control, route through OpenClaw, return JSON."""
 
+import asyncio
 import logging
 from datetime import date
 
-import httpx
 from fastapi import APIRouter, Request
 
 from app.config import get_settings
 from app.services.mms_media import build_message_content
+from app.services.sms_context import (
+    FALLBACK_MESSAGE,
+    HOLDING_MESSAGE,
+    TWILIO_REPLY_TIMEOUT,
+    ask_openclaw,
+    send_delayed_reply,
+    truncate_reply,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["proxy"])
-
-OPENCLAW_URL = "http://localhost:18789/v1/chat/completions"
-FALLBACK_MESSAGE = "Sorry, I'm having trouble right now. Please try again later."
 
 
 @router.post("/proxy/inbound-sms")
@@ -37,28 +42,17 @@ async def proxy_inbound_sms(request: Request):
 
     content = await build_message_content(form)
 
-    reply = FALLBACK_MESSAGE
+    task = asyncio.create_task(ask_openclaw(settings, session_key, content))
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                OPENCLAW_URL,
-                headers={
-                    "Authorization": f"Bearer {settings.OPENCLAW_GATEWAY_TOKEN}",
-                    "x-openclaw-session-key": session_key,
-                },
-                json={
-                    "model": settings.AGENT_THINK_MODEL,
-                    "messages": [{"role": "user", "content": content}],
-                    "stream": False,
-                },
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            reply = data["choices"][0]["message"]["content"]
+        reply = await asyncio.wait_for(asyncio.shield(task), timeout=TWILIO_REPLY_TIMEOUT)
+        reply = truncate_reply(reply)
+        logger.info("Proxy SMS reply to %s: %s", from_number, reply[:200])
+        return {"reply": reply}
+    except asyncio.TimeoutError:
+        logger.warning("OpenClaw timed out for %s, sending holding message", from_number)
+        asyncio.create_task(send_delayed_reply(task, from_number))
+        return {"reply": HOLDING_MESSAGE}
     except Exception:
         logger.exception("Failed to get response from OpenClaw")
-
-    logger.info("Proxy SMS reply to %s: %s", from_number, reply[:200])
-
-    return {"reply": reply}
+        return {"reply": FALLBACK_MESSAGE}
