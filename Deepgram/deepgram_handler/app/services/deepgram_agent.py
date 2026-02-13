@@ -597,7 +597,7 @@ async def run_agent_bridge(
                     inject_message=lambda msg: dg_ws.send(
                         json.dumps({"type": "InjectAgentMessage", "message": msg})
                     ),
-                    end_call=lambda: stop_event.set() or asyncio.sleep(0),
+                    end_call=lambda: (stop_event.set(), asyncio.sleep(0))[1],
                     log=lambda msg: logger.info(msg),
                 ),
             )
