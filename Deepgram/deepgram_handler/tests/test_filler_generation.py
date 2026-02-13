@@ -119,9 +119,12 @@ async def test_generate_filler_phrase_empty_content():
 @pytest.mark.asyncio
 async def test_generate_filler_phrase_timeout():
     """Returns None if Haiku call exceeds hard timeout."""
+
     async def slow_post(*args, **kwargs):
         await asyncio.sleep(5.0)  # Way past the 2s timeout
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "Late."}]})
+        return httpx.Response(
+            200, json={"content": [{"type": "text", "text": "Late."}]}
+        )
 
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
