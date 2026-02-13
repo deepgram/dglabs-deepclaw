@@ -63,6 +63,21 @@ class Settings(BaseSettings):
     CALLS_MAX_ENTRIES: int = 50
     POST_CALL_EXTRACTION: bool = True
 
+    # Session timers (voice call dead-air and idle caller handling)
+    SESSION_TIMER_ENABLED: bool = True
+    RESPONSE_REENGAGE_MS: int = 15_000
+    RESPONSE_EXIT_MS: int = 45_000
+    IDLE_PROMPT_MS: int = 30_000
+    IDLE_EXIT_MS: int = 15_000
+    RESPONSE_REENGAGE_MESSAGE: str = (
+        "I'm having trouble with that one. Could you try asking differently?"
+    )
+    RESPONSE_EXIT_MESSAGE: str = (
+        "I'm sorry, I can't respond right now. Talk to you later. Goodbye."
+    )
+    IDLE_PROMPT_MESSAGE: str = "Are you still there?"
+    IDLE_EXIT_MESSAGE: str = "Alright, I'll let you go. Call back anytime. Goodbye."
+
     @property
     def filler_phrases_list(self) -> list[str]:
         if self.FILLER_PHRASES:
