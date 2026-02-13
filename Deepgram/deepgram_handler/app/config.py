@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     )
     AGENT_GREETING: str = "Hello! How can I help you today?"
 
+    # Action nudge configuration
+    ENABLE_ACTION_NUDGES: bool = True
+    FIRST_CALLER_NUDGE_WINDOW_SEC: int = 15
+    RETURNING_CALLER_NUDGE_WINDOW_SEC: int = 45
+
     # Control plane proxy URL (for outbound SMS)
     TWILIO_PROXY_URL: str = ""
 
@@ -52,6 +57,11 @@ class Settings(BaseSettings):
         "Hmm, let me see.",
         "One moment while I think on that.",
     ]
+
+    # Post-call extraction
+    TIMEZONE: str = "UTC"
+    CALLS_MAX_ENTRIES: int = 50
+    POST_CALL_EXTRACTION: bool = True
 
     @property
     def filler_phrases_list(self) -> list[str]:
