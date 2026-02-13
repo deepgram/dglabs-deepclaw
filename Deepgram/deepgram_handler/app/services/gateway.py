@@ -48,7 +48,7 @@ async def call_gateway(
                                 "minProtocol": 1,
                                 "maxProtocol": 100,
                                 "client": {
-                                    "id": "deepgram-sidecar",
+                                    "id": "gateway-client",
                                     "version": "1.0",
                                     "platform": "python",
                                     "mode": "backend",
