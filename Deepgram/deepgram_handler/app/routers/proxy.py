@@ -8,13 +8,14 @@ from fastapi import APIRouter, Request
 
 from app.config import get_settings
 from app.services.mms_media import build_message_content
+from app.services.sms_context import build_sms_messages
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["proxy"])
 
 OPENCLAW_URL = "http://localhost:18789/v1/chat/completions"
-FALLBACK_MESSAGE = "Sorry, I'm having trouble right now. Please try again later."
+FALLBACK_MESSAGE = "Hey! I'm just getting set up — text me again in a minute and I'll be ready to chat."
 
 
 @router.post("/proxy/inbound-sms")
@@ -48,7 +49,7 @@ async def proxy_inbound_sms(request: Request):
                 },
                 json={
                     "model": settings.AGENT_THINK_MODEL,
-                    "messages": [{"role": "user", "content": content}],
+                    "messages": build_sms_messages(content),
                     "stream": False,
                 },
                 timeout=30.0,

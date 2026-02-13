@@ -1,9 +1,13 @@
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+
+# Point USER_MD_PATH to a nonexistent file so tests always get the new-user prompt.
+_NO_USER_MD = patch("app.services.sms_context.USER_MD_PATH", Path("/nonexistent/USER.md"))
 
 
 @pytest.fixture
@@ -30,7 +34,10 @@ def test_proxy_inbound_sms_returns_reply(client):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("app.routers.proxy.httpx.AsyncClient", return_value=mock_client):
+    with (
+        patch("app.routers.proxy.httpx.AsyncClient", return_value=mock_client),
+        _NO_USER_MD,
+    ):
         response = client.post(
             "/proxy/inbound-sms",
             data={"From": "+15551234567", "Body": "hello", "MessageSid": "SM123"},
@@ -51,8 +58,9 @@ def test_proxy_inbound_sms_returns_reply(client):
     assert headers["Authorization"] == "Bearer test-token"
     assert headers["x-openclaw-session-key"].startswith("agent:main:sms-")
     body = call_args[1]["json"]
-    assert body["messages"][0]["role"] == "user"
-    assert body["messages"][0]["content"] == "hello"
+    assert body["messages"][0]["role"] == "system"
+    assert body["messages"][1]["role"] == "user"
+    assert body["messages"][1]["content"] == "hello"
 
 
 def test_proxy_inbound_sms_openclaw_error_returns_fallback(client):
@@ -70,7 +78,7 @@ def test_proxy_inbound_sms_openclaw_error_returns_fallback(client):
 
     assert response.status_code == 200
     assert response.json() == {
-        "reply": "Sorry, I'm having trouble right now. Please try again later."
+        "reply": "Hey! I'm just getting set up — text me again in a minute and I'll be ready to chat."
     }
 
 
@@ -90,6 +98,7 @@ def test_proxy_inbound_mms_sends_multimodal_content(client):
     with (
         patch("app.routers.proxy.httpx.AsyncClient", return_value=mock_client),
         patch("app.routers.proxy.build_message_content", return_value=fake_content),
+        _NO_USER_MD,
     ):
         response = client.post(
             "/proxy/inbound-sms",
@@ -106,9 +115,9 @@ def test_proxy_inbound_mms_sends_multimodal_content(client):
     assert response.status_code == 200
     assert response.json() == {"reply": "Got your image!"}
 
-    # Verify multimodal content was forwarded to OpenClaw
+    # Verify multimodal content was forwarded to OpenClaw (user message at index 1)
     call_args = mock_client.post.call_args
-    content = call_args[1]["json"]["messages"][0]["content"]
+    content = call_args[1]["json"]["messages"][1]["content"]
     assert isinstance(content, list)
     assert content[0] == {"type": "text", "text": "check this out"}
     assert content[1]["type"] == "image_url"
