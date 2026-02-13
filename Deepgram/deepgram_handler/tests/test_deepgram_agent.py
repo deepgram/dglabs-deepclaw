@@ -755,3 +755,19 @@ def test_blank_user_md_treated_as_first_caller(tmp_path, monkeypatch):
     # Should be first-caller (blank USER.md + blank IDENTITY.md)
     assert "First-caller bootstrap" in prompt
     assert "Caller context" not in prompt
+
+
+def test_build_settings_config_includes_end_call_function():
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="test-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="test123")
+    functions = config["agent"]["think"].get("functions", [])
+    names = [f["name"] for f in functions]
+    assert "end_call" in names
+
+    end_call = next(f for f in functions if f["name"] == "end_call")
+    assert "farewell" in end_call["parameters"]["properties"]
+    assert "farewell" in end_call["parameters"]["required"]
