@@ -111,11 +111,11 @@ async def proxy_chat_completions(request: Request):
         dynamic_phrase_holder: list[str | None] = [None]
 
         # Kick off dynamic generation in parallel
-        if settings.FILLER_DYNAMIC and settings.ANTHROPIC_API_KEY and user_message:
+        if settings.FILLER_DYNAMIC and settings.OPENCLAW_GATEWAY_TOKEN and user_message:
 
             async def _gen():
                 dynamic_phrase_holder[0] = await generate_filler_phrase(
-                    user_message, settings.ANTHROPIC_API_KEY
+                    user_message, settings.OPENCLAW_GATEWAY_TOKEN
                 )
 
             asyncio.create_task(_gen())
