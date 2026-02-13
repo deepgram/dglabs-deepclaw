@@ -19,3 +19,4 @@ export {
   saveSessionStore,
   resolveSessionFilePath,
 } from "./config/sessions.ts";
+export { callGateway } from "./gateway/call.ts";

@@ -71,8 +71,12 @@ data/deepclaw/
 data/workspace/memory/
 data/workspace/**/memory/
 data/workspace/MEMORY.md
+data/workspace/CALENDAR.md
+data/workspace/USER.md
 data/workspace/**/CALLS.md
 data/workspace/**/.git/
+data/workspace/.pages/
+data/workspace/**/.pages/
 data/workspace/skills/
 
 # Config dir runtime artifacts (keep only openclaw.json)
@@ -82,7 +86,7 @@ config/*
 
 # Local untracked files
 .local/
-/IDENTITY.md
+IDENTITY.md
 /USER.md
 .tgz
 

@@ -221,9 +221,7 @@ export async function handleOpenAiHttpRequest(
 
   const runId = `chatcmpl_${randomUUID()}`;
   const reqStartMs = Date.now();
-  console.log(
-    `[openai-http] ${runId} agent=${agentId} session=${sessionKey} stream=${stream} model=${model} promptLen=${prompt.message.length}`,
-  );
+  console.log(`[openai-http] ${runId} agent=${agentId} model=${model} stream=${stream}`);
   const deps = createDefaultDeps();
 
   if (!stream) {
@@ -341,7 +339,6 @@ export async function handleOpenAiHttpRequest(
 
   void (async () => {
     try {
-      console.log(`[openai-http] ${runId} agentCommand starting`);
       const result = await agentCommand(
         {
           message: prompt.message,

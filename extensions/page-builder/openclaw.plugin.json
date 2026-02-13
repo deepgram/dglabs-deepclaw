@@ -1,0 +1,8 @@
+{
+  "id": "page-builder",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

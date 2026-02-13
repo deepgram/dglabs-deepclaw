@@ -186,6 +186,42 @@
     "responseTimeoutMs": {
       "label": "Response Timeout (ms)",
       "advanced": true
+    },
+    "sessionTimers.enabled": {
+      "label": "Session Timers Enabled",
+      "advanced": true
+    },
+    "sessionTimers.responseReengageMs": {
+      "label": "Response Re-engage Timeout (ms)",
+      "advanced": true
+    },
+    "sessionTimers.responseExitMs": {
+      "label": "Response Exit Timeout (ms)",
+      "advanced": true
+    },
+    "sessionTimers.idlePromptMs": {
+      "label": "Idle Prompt Timeout (ms)",
+      "advanced": true
+    },
+    "sessionTimers.idleExitMs": {
+      "label": "Idle Exit Timeout (ms)",
+      "advanced": true
+    },
+    "sessionTimers.responseReengageMessage": {
+      "label": "Response Re-engage Message",
+      "advanced": true
+    },
+    "sessionTimers.responseExitMessage": {
+      "label": "Response Exit Message",
+      "advanced": true
+    },
+    "sessionTimers.idlePromptMessage": {
+      "label": "Idle Prompt Message",
+      "advanced": true
+    },
+    "sessionTimers.idleExitMessage": {
+      "label": "Idle Exit Message",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -646,6 +682,21 @@
       "responseTimeoutMs": {
         "type": "integer",
         "minimum": 1
+      },
+      "sessionTimers": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "responseReengageMs": { "type": "integer", "minimum": 0 },
+          "responseExitMs": { "type": "integer", "minimum": 0 },
+          "idlePromptMs": { "type": "integer", "minimum": 0 },
+          "idleExitMs": { "type": "integer", "minimum": 0 },
+          "responseReengageMessage": { "type": "string" },
+          "responseExitMessage": { "type": "string" },
+          "idlePromptMessage": { "type": "string" },
+          "idleExitMessage": { "type": "string" }
+        }
       }
     }
   }

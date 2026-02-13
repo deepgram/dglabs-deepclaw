@@ -63,9 +63,7 @@ export async function handleToolExecutionStart(
   }
 
   // diagnostic: log every tool call the LLM makes
-  console.log(
-    `[tool-call] START tool=${toolName} callId=${toolCallId} args=${JSON.stringify(args).slice(0, 500)}`,
-  );
+  console.log(`[tool-call] START tool=${toolName} callId=${toolCallId}`);
   const meta = extendExecMeta(toolName, args, inferToolMetaFromArgs(toolName, args));
   ctx.state.toolMetaById.set(toolCallId, meta);
   ctx.log.debug(
@@ -165,9 +163,7 @@ export function handleToolExecutionEnd(
   const isToolError = isError || isToolResultError(result);
   const sanitizedResult = sanitizeToolResult(result);
   // diagnostic: log tool result
-  console.log(
-    `[tool-call] END tool=${toolName} callId=${toolCallId} error=${isToolError} result=${JSON.stringify(sanitizedResult).slice(0, 500)}`,
-  );
+  console.log(`[tool-call] END tool=${toolName} callId=${toolCallId} error=${isToolError}`);
   const meta = ctx.state.toolMetaById.get(toolCallId);
   ctx.state.toolMetas.push({ toolName, meta });
   ctx.state.toolMetaById.delete(toolCallId);

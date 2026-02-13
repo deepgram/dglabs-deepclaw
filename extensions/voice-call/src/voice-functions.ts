@@ -108,9 +108,35 @@ export const voiceHandoffFunction: DeepgramFunctionDef = {
 };
 
 /**
+ * Function definition for end_call — gracefully ends the phone call.
+ * Handled client-side in the bridge (not proxied to gateway).
+ */
+export const endCallFunction: DeepgramFunctionDef = {
+  name: "end_call",
+  description:
+    "End the phone call gracefully. Use when the conversation has concluded or the caller says goodbye.",
+  parameters: {
+    type: "object",
+    properties: {
+      farewell: {
+        type: "string",
+        description: "Goodbye message to speak before hanging up",
+      },
+    },
+    required: ["farewell"],
+  },
+};
+
+/**
  * Returns the set of Deepgram function definitions for inter-agent
  * communication tools available to voice sessions.
  */
 export function buildVoiceAgentFunctions(): DeepgramFunctionDef[] {
-  return [sessionsSpawnFunction, sessionsSendFunction, sessionStatusFunction, voiceHandoffFunction];
+  return [
+    sessionsSpawnFunction,
+    sessionsSendFunction,
+    sessionStatusFunction,
+    voiceHandoffFunction,
+    endCallFunction,
+  ];
 }

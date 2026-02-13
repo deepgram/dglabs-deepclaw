@@ -15,6 +15,7 @@ import { TwilioProvider } from "./providers/twilio.js";
 import { createTelephonyTtsProvider } from "./telephony-tts.js";
 import { startTunnel, type TunnelResult } from "./tunnel.js";
 import { extractUserProfileFromCall } from "./user-profile-extraction.js";
+import { endCallFunction } from "./voice-functions.js";
 import {
   cleanupTailscaleExposure,
   setupTailscaleExposure,
@@ -212,7 +213,9 @@ export async function createVoiceCallRuntime(params: {
 
   // Deepgram hybrid mode: Twilio handles telephony, Deepgram handles voice AI
   if (config.provider === "deepgram" && config.deepgram) {
-    const deepgramProvider = new DeepgramProvider(config.deepgram);
+    const deepgramProvider = new DeepgramProvider(config.deepgram, {
+      functions: [endCallFunction],
+    });
     const twilioProvider = provider as TwilioProvider;
 
     // Ensure public URL is set for stream URL generation
@@ -235,9 +238,6 @@ export async function createVoiceCallRuntime(params: {
       // No stream gating — a Twilio proxy handles call auth upstream
       shouldAcceptStream: () => true,
       onCallEnded: (callRecord, agentId) => {
-        console.log(
-          `[USER.md lifecycle] onCallEnded fired — agentId=${agentId} callId=${callRecord.callId} transcriptEntries=${callRecord.transcript.length}`,
-        );
         void generateCallSummary({
           voiceConfig: config,
           coreConfig,
