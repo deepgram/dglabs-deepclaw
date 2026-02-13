@@ -35,6 +35,7 @@ from app.services.user_md_parser import (
     parse_calls_md,
     parse_user_markdown,
 )
+from app.services.session_timers import SessionTimers, SessionTimerCallbacks
 from app.services.user_profile import extract_user_profile
 from app.services.workspace import CallInfo, TranscriptEntry
 
@@ -353,8 +354,11 @@ async def _deepgram_to_twilio(
     stream_sid: str,
     stop_event: asyncio.Event,
     transcript: list[TranscriptEntry] | None = None,
+    timers: SessionTimers | None = None,
 ) -> None:
     """Forward audio from Deepgram to Twilio and handle agent events."""
+    end_call_farewell_pending = False
+
     try:
         async for message in dg_ws:
             if stop_event.is_set():
@@ -373,6 +377,7 @@ async def _deepgram_to_twilio(
 
                 if msg_type == "Error":
                     logger.error("Deepgram error: %s", json.dumps(msg))
+
                 elif msg_type == "ConversationText":
                     role = msg.get("role", "")
                     content = msg.get("content", "")
@@ -382,13 +387,60 @@ async def _deepgram_to_twilio(
                         transcript.append(
                             TranscriptEntry(timestamp=time.time(), speaker=speaker, text=content)
                         )
+                    if timers:
+                        if role == "user":
+                            timers.on_user_spoke()
+                        elif role == "assistant":
+                            timers.on_agent_started_speaking()
+
+                elif msg_type == "UserStartedSpeaking":
+                    await twilio_ws.send_text(build_clear_event(stream_sid))
+                    if timers:
+                        timers.on_user_started_speaking()
+
+                elif msg_type == "AgentStartedSpeaking":
+                    if timers:
+                        timers.on_agent_started_speaking()
+
+                elif msg_type == "AgentAudioDone":
+                    if timers:
+                        timers.on_agent_audio_done()
+                    if end_call_farewell_pending:
+                        end_call_farewell_pending = False
+                        logger.info("end_call farewell spoken, hanging up in 1s")
+                        await asyncio.sleep(1.0)
+                        stop_event.set()
+                        return
+
+                elif msg_type == "FunctionCallRequest":
+                    fn_name = msg.get("function_name", "")
+                    fn_call_id = msg.get("function_call_id", "")
+                    fn_input = msg.get("input", {})
+
+                    if fn_name == "end_call":
+                        logger.info("end_call function invoked by LLM")
+                        if timers:
+                            timers.clear_all()
+                        # ACK the function call
+                        await dg_ws.send(json.dumps({
+                            "type": "FunctionCallResponse",
+                            "function_call_id": fn_call_id,
+                            "output": json.dumps({"ok": True}),
+                        }))
+                        # Inject farewell
+                        farewell = fn_input.get("farewell", "Goodbye!")
+                        await dg_ws.send(json.dumps({
+                            "type": "InjectAgentMessage",
+                            "message": farewell,
+                        }))
+                        end_call_farewell_pending = True
+                    else:
+                        logger.info("Unhandled function call: %s", fn_name)
+
                 elif msg_type == "Warning":
                     logger.warning("Deepgram warning: %s", json.dumps(msg))
                 else:
                     logger.info("Deepgram event: %s", msg_type)
-
-                if msg_type == "UserStartedSpeaking":
-                    await twilio_ws.send_text(build_clear_event(stream_sid))
 
     except ConnectionClosed:
         logger.info("Deepgram WS closed")
@@ -440,6 +492,7 @@ async def run_agent_bridge(
         return
 
     session_key = None
+    timers: SessionTimers | None = None
     try:
         if call_id is None:
             call_id = uuid.uuid4().hex[:12]
@@ -460,14 +513,40 @@ async def run_agent_bridge(
         stop_event = asyncio.Event()
         transcript: list[TranscriptEntry] = []
 
+        # Create session timers
+        if settings.SESSION_TIMER_ENABLED:
+            timers = SessionTimers(
+                {
+                    "enabled": True,
+                    "response_reengage_ms": settings.RESPONSE_REENGAGE_MS,
+                    "response_exit_ms": settings.RESPONSE_EXIT_MS,
+                    "idle_prompt_ms": settings.IDLE_PROMPT_MS,
+                    "idle_exit_ms": settings.IDLE_EXIT_MS,
+                    "response_reengage_message": settings.RESPONSE_REENGAGE_MESSAGE,
+                    "response_exit_message": settings.RESPONSE_EXIT_MESSAGE,
+                    "idle_prompt_message": settings.IDLE_PROMPT_MESSAGE,
+                    "idle_exit_message": settings.IDLE_EXIT_MESSAGE,
+                },
+                SessionTimerCallbacks(
+                    inject_message=lambda msg: dg_ws.send(
+                        json.dumps({"type": "InjectAgentMessage", "message": msg})
+                    ),
+                    end_call=lambda: stop_event.set() or asyncio.sleep(0),
+                    log=lambda msg: logger.info(msg),
+                ),
+            )
+
         t2d = asyncio.create_task(_twilio_to_deepgram(twilio_ws, dg_ws, stop_event))
         d2t = asyncio.create_task(
-            _deepgram_to_twilio(dg_ws, twilio_ws, stream_sid, stop_event, transcript)
+            _deepgram_to_twilio(dg_ws, twilio_ws, stream_sid, stop_event, transcript, timers)
         )
 
         await asyncio.gather(t2d, d2t, return_exceptions=True)
 
     finally:
+        if timers:
+            timers.clear_all()
+
         if session_key:
             session_registry.unregister(session_key)
 
