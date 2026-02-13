@@ -81,11 +81,19 @@ class SessionTimers:
                 lambda: asyncio.ensure_future(self._fire_response_exit()),
             )
 
+        self._cb.log(
+            f"[SessionTimers] on_user_spoke — response timers started "
+            f"(reengage={reengage_ms}ms, exit={exit_ms}ms)"
+        )
+
     def on_agent_started_speaking(self) -> None:
         """Agent started speaking — cancel response timers (silent recovery)."""
         if not self.enabled or self._exiting:
             return
+        had_timers = self._response_reengage_handle is not None or self._response_exit_handle is not None
         self._clear_response_timers()
+        if had_timers:
+            self._cb.log("[SessionTimers] on_agent_started_speaking — response timers cancelled")
 
     # ------------------------------------------------------------------
     # Idle caller detection chain
@@ -95,14 +103,18 @@ class SessionTimers:
         """User started speaking — cancel idle timers (barge-in)."""
         if not self.enabled or self._exiting:
             return
+        had_timers = self._idle_prompt_handle is not None or self._idle_exit_handle is not None
         self._clear_idle_timers()
         self._idle_prompted = False
+        if had_timers:
+            self._cb.log("[SessionTimers] on_user_started_speaking — idle timers cancelled")
 
     def on_agent_audio_done(self) -> None:
         """Agent finished speaking — start idle timers."""
         if not self.enabled or self._exiting:
             return
         if self._idle_prompted:
+            self._cb.log("[SessionTimers] on_agent_audio_done — skipped (idle_prompted guard)")
             return
 
         self._clear_idle_timers()
@@ -113,6 +125,9 @@ class SessionTimers:
             self._idle_prompt_handle = loop.call_later(
                 prompt_ms / 1000,
                 lambda: asyncio.ensure_future(self._fire_idle_prompt()),
+            )
+            self._cb.log(
+                f"[SessionTimers] on_agent_audio_done — idle timer started (prompt={prompt_ms}ms)"
             )
 
     # ------------------------------------------------------------------
@@ -201,3 +216,4 @@ class SessionTimers:
         self._exiting = True
         self._clear_response_timers()
         self._clear_idle_timers()
+        self._cb.log("[SessionTimers] clear_all — all timers cancelled")

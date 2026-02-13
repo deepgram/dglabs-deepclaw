@@ -33,6 +33,7 @@ async def call_gateway(
     Returns the ``payload`` field from the response, or ``None`` on any error.
     """
     try:
+        logger.info("Gateway RPC %s — connecting to %s", method, gateway_url)
         async with asyncio.timeout(timeout):
             async with websockets.connect(gateway_url) as ws:
                 # --- connect handshake ---
@@ -68,6 +69,9 @@ async def call_gateway(
                 while True:
                     raw = await ws.recv()
                     msg = json.loads(raw)
+                    if msg.get("type") == "event":
+                        logger.debug("Gateway WS event during handshake: %s", msg.get("event"))
+                        continue
                     if msg.get("type") == "res" and msg.get("id") == connect_id:
                         if not msg.get("ok"):
                             error = msg.get("error", {})
@@ -76,6 +80,7 @@ async def call_gateway(
                                 error.get("message", "unknown"),
                             )
                             return None
+                        logger.info("Gateway RPC %s — connected", method)
                         break
 
                 # --- method request ---
@@ -95,6 +100,9 @@ async def call_gateway(
                 while True:
                     raw = await ws.recv()
                     msg = json.loads(raw)
+                    if msg.get("type") == "event":
+                        logger.debug("Gateway WS event during RPC: %s", msg.get("event"))
+                        continue
                     if msg.get("type") == "res" and msg.get("id") == req_id:
                         if not msg.get("ok"):
                             error = msg.get("error", {})
@@ -104,6 +112,7 @@ async def call_gateway(
                                 error.get("message", "unknown"),
                             )
                             return None
+                        logger.info("Gateway RPC %s — success", method)
                         return msg.get("payload")
 
     except Exception:
