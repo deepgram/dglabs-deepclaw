@@ -31,6 +31,9 @@ const OPENROUTER_KEY_PREFIXES = ["sk-or-"];
 const XAI_API_ENDPOINT = "https://api.x.ai/v1/responses";
 const DEFAULT_GROK_MODEL = "grok-4-1-fast";
 
+const ANTHROPIC_MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages";
+const DEFAULT_ANTHROPIC_SEARCH_MODEL = "claude-sonnet-4-5-20250929";
+
 const SEARCH_CACHE = new Map<string, CacheEntry<Record<string, unknown>>>();
 const BRAVE_FRESHNESS_SHORTCUTS = new Set(["pd", "pw", "pm", "py"]);
 const BRAVE_FRESHNESS_RANGE = /^(\d{4}-\d{2}-\d{2})to(\d{4}-\d{2}-\d{2})$/;
@@ -118,6 +121,32 @@ type PerplexitySearchResponse = {
     };
   }>;
   citations?: string[];
+};
+
+type AnthropicSearchContentBlock =
+  | {
+      type: "text";
+      text: string;
+      citations?: Array<{
+        type: string;
+        url?: string;
+        title?: string;
+        cited_text?: string;
+      }>;
+    }
+  | {
+      type: "web_search_tool_result";
+      content?: Array<{
+        type: string;
+        url?: string;
+        title?: string;
+        page_age?: string;
+      }>;
+    }
+  | { type: string };
+
+type AnthropicSearchResponse = {
+  content?: AnthropicSearchContentBlock[];
 };
 
 type PerplexityBaseUrlHint = "direct" | "openrouter";
@@ -305,6 +334,67 @@ function resolveGrokModel(grok?: GrokConfig): string {
 
 function resolveGrokInlineCitations(grok?: GrokConfig): boolean {
   return grok?.inlineCitations === true;
+}
+
+function resolveAnthropicApiKey(): string | undefined {
+  const fromEnv = normalizeApiKey(process.env.ANTHROPIC_API_KEY);
+  return fromEnv || undefined;
+}
+
+async function runAnthropicSearch(params: {
+  query: string;
+  apiKey: string;
+  timeoutSeconds: number;
+}): Promise<{ content: string; citations: string[] }> {
+  const res = await fetch(ANTHROPIC_MESSAGES_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": params.apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: DEFAULT_ANTHROPIC_SEARCH_MODEL,
+      max_tokens: 1024,
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      messages: [{ role: "user", content: params.query }],
+    }),
+    signal: withTimeout(undefined, params.timeoutSeconds * 1000),
+  });
+
+  if (!res.ok) {
+    const detail = await readResponseText(res);
+    throw new Error(`Anthropic API error (${res.status}): ${detail || res.statusText}`);
+  }
+
+  const data = (await res.json()) as AnthropicSearchResponse;
+  const blocks = data.content ?? [];
+
+  const textParts: string[] = [];
+  const citations: string[] = [];
+
+  for (const block of blocks) {
+    if (block.type === "text" && "text" in block) {
+      textParts.push(block.text);
+      if ("citations" in block) {
+        for (const cite of block.citations ?? []) {
+          if (cite.url && !citations.includes(cite.url)) {
+            citations.push(cite.url);
+          }
+        }
+      }
+    }
+    if (block.type === "web_search_tool_result" && "content" in block) {
+      for (const result of block.content ?? []) {
+        if (result.url && !citations.includes(result.url)) {
+          citations.push(result.url);
+        }
+      }
+    }
+  }
+
+  const content = textParts.join("\n\n") || "No response";
+  return { content, citations };
 }
 
 function resolveSearchCount(value: unknown, fallback: number): number {
@@ -629,6 +719,37 @@ export function createWebSearchTool(options?: {
             : resolveSearchApiKey(search);
 
       if (!apiKey) {
+        const anthropicKey = resolveAnthropicApiKey();
+        if (anthropicKey) {
+          const params = args as Record<string, unknown>;
+          const query = readStringParam(params, "query", { required: true });
+          const timeoutSeconds = resolveTimeoutSeconds(
+            search?.timeoutSeconds,
+            DEFAULT_TIMEOUT_SECONDS,
+          );
+          const cacheTtlMs = resolveCacheTtlMs(search?.cacheTtlMinutes, DEFAULT_CACHE_TTL_MINUTES);
+          const cacheKey = normalizeCacheKey(`anthropic:${query}`);
+          const cached = readCache(SEARCH_CACHE, cacheKey);
+          if (cached) {
+            return jsonResult({ ...cached.value, cached: true });
+          }
+          const start = Date.now();
+          const { content, citations } = await runAnthropicSearch({
+            query,
+            apiKey: anthropicKey,
+            timeoutSeconds,
+          });
+          const payload = {
+            query,
+            provider: "anthropic" as const,
+            model: DEFAULT_ANTHROPIC_SEARCH_MODEL,
+            tookMs: Date.now() - start,
+            content: wrapWebContent(content),
+            citations,
+          };
+          writeCache(SEARCH_CACHE, cacheKey, payload, cacheTtlMs);
+          return jsonResult(payload);
+        }
         return jsonResult(missingSearchKeyPayload(provider));
       }
       const params = args as Record<string, unknown>;
