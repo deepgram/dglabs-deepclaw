@@ -1,0 +1,6 @@
+import os
+
+# Set required env vars for tests
+os.environ.setdefault("DEEPGRAM_API_KEY", "test-key")
+os.environ.setdefault("OPENCLAW_GATEWAY_TOKEN", "test-token")
+os.environ.setdefault("TWILIO_PROXY_URL", "http://test-control-plane")

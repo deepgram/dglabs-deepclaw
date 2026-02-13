@@ -1,0 +1,45 @@
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    DEEPGRAM_API_KEY: str
+    DEEPGRAM_AGENT_URL: str = "wss://agent.deepgram.com/v1/agent/converse"
+
+    # OpenClaw
+    OPENCLAW_GATEWAY_TOKEN: str
+    OPENCLAW_AGENT_ID: str = "main"
+    PUBLIC_URL: str = "https://deepclaw-instance.fly.dev"
+
+    # Voice agent configuration
+    AGENT_LISTEN_MODEL: str = "flux-general-en"
+    AGENT_THINK_MODEL: str = "anthropic/claude-haiku-4-5"
+    AGENT_VOICE: str = "aura-2-thalia-en"
+    AGENT_PROMPT: str = (
+        "You are on a phone call with someone for the first time. "
+        "You don't have a name yet — if the caller asks, say you haven't picked one yet. "
+        "Within the first exchange, naturally ask their name if you don't have it yet. "
+        "IMPORTANT: When someone says 'call me [name]' or 'you can call me [name]', "
+        "they are telling you their NAME — not asking you to make a phone call. "
+        "IMPORTANT: Your responses will be spoken aloud via text-to-speech. Do NOT use any text formatting — "
+        "no markdown, no bullet points, no asterisks, no numbered lists, no headers. "
+        "Write plain conversational sentences only. "
+        "Keep responses brief and conversational (1-2 sentences max). "
+        'Do NOT start your response with filler phrases like "Let me check" or "One moment" — '
+        "jump straight into the answer."
+    )
+    AGENT_GREETING: str = "Hello! How can I help you today?"
+
+    # Control plane proxy URL (for outbound SMS)
+    TWILIO_PROXY_URL: str = ""
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return a cached singleton Settings instance."""
+    return Settings()
