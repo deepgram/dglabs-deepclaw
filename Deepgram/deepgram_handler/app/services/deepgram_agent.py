@@ -18,6 +18,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from app.config import Settings, get_settings
+from app.services import session_registry
 from app.services.twilio_media import (
     build_clear_event,
     build_media_event,
@@ -292,9 +293,13 @@ async def run_agent_bridge(
         logger.exception("Failed to connect to Deepgram Agent")
         return
 
+    session_key = None
     try:
         if call_id is None:
             call_id = uuid.uuid4().hex[:12]
+
+        session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
+
         config = build_settings_config(
             settings,
             call_id=call_id,
@@ -303,6 +308,8 @@ async def run_agent_bridge(
         )
         await dg_ws.send(json.dumps(config))
         logger.info("Sent settings config to Deepgram")
+
+        session_registry.register(session_key, dg_ws)
 
         stop_event = asyncio.Event()
 
@@ -314,6 +321,9 @@ async def run_agent_bridge(
         await asyncio.gather(t2d, d2t, return_exceptions=True)
 
     finally:
+        if session_key:
+            session_registry.unregister(session_key)
+
         try:
             await dg_ws.close()
         except Exception:
@@ -321,7 +331,8 @@ async def run_agent_bridge(
 
         # Post-call: generate next greeting (inbound calls only)
         if not prompt_override:
-            session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
+            if not session_key:
+                session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
             await _generate_next_greeting(settings, session_key=session_key)
 
     logger.info("Agent bridge finished")
