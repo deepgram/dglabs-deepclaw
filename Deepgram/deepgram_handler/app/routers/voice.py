@@ -76,7 +76,10 @@ async def twilio_stream(websocket: WebSocket):
                 stream_sid = start_data.get("streamSid", "")
                 custom = start_data.get("customParameters", {})
                 caller_phone = custom.get("caller_phone")
-                logger.info("Stream started: streamSid=%s caller=%s", stream_sid, caller_phone)
+                logger.info(
+                    "Stream started: streamSid=%s caller=%s customParams=%s",
+                    stream_sid, caller_phone, custom,
+                )
     except asyncio.TimeoutError:
         logger.error("Timed out waiting for stream start event")
         return
