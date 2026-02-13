@@ -284,9 +284,9 @@ async def test_generate_next_greeting_writes_file(tmp_path, monkeypatch):
     mock_response = httpx.Response(
         200,
         json={
-            "choices": [{"message": {"content": "Back again? Let's make it count."}}]
+            "content": [{"type": "text", "text": "Back again? Let's make it count."}]
         },
-        request=httpx.Request("POST", "http://localhost:18789/v1/chat/completions"),
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
     )
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -299,6 +299,7 @@ async def test_generate_next_greeting_writes_file(tmp_path, monkeypatch):
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
         OPENCLAW_GATEWAY_TOKEN="gw-token",
+        ANTHROPIC_API_KEY="test-anthropic-key",
         _env_file=None,
     )
     await _generate_next_greeting(settings, session_key="agent:main:abc123")
@@ -308,7 +309,7 @@ async def test_generate_next_greeting_writes_file(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_generate_next_greeting_handles_failure(tmp_path, monkeypatch):
-    """If OpenClaw call fails, no file is written and no exception propagates."""
+    """If Anthropic call fails, no file is written and no exception propagates."""
     from app.services.deepgram_agent import _generate_next_greeting
 
     greeting_file = tmp_path / "NEXT_GREETING.txt"
@@ -325,6 +326,7 @@ async def test_generate_next_greeting_handles_failure(tmp_path, monkeypatch):
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
         OPENCLAW_GATEWAY_TOKEN="gw-token",
+        ANTHROPIC_API_KEY="test-anthropic-key",
         _env_file=None,
     )
     # Should not raise

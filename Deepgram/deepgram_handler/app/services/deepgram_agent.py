@@ -105,6 +105,18 @@ def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
         now = datetime.now(timezone.utc)
         lines.append(f"- Current UTC time: {now.strftime('%Y-%m-%d %H:%M UTC')}.")
     lines.append("- If you are asked to text or call someone, use the twilio action.")
+    lines.append("")
+    lines.append("Background tasks:")
+    lines.append(
+        "- For anything that takes more than a few seconds (research, writing, analysis, "
+        "lookups, multi-step tasks), use sessions_spawn to run it in the background."
+    )
+    lines.append(
+        "- Tell the caller you'll text them the results. Example: "
+        "\"I'll research that and text you what I find.\""
+    )
+    lines.append("- Do NOT make the caller wait on the phone while you do long tool calls or web searches.")
+    lines.append("- Quick factual answers (weather, time, simple math) can be answered directly.")
 
     # -- Caller context (returning caller) --
     if profile_filled:
@@ -185,34 +197,60 @@ GREETING_GENERATION_PROMPT = (
     "One sentence max. No quotes. No emojis. Just the raw greeting text."
 )
 
-OPENCLAW_URL = "http://localhost:18789/v1/chat/completions"
+GREETING_MODEL = "claude-haiku-4-5-20251001"
+GREETING_TIMEOUT_S = 5.0
 
 
 async def _generate_next_greeting(settings: Settings, session_key: str) -> None:
-    """Ask OpenClaw to generate a greeting for the next call and write it to disk."""
+    """Generate a greeting for the next call via direct Anthropic API.
+
+    Calls Anthropic directly (bypassing the local gateway) so the request
+    doesn't get queued behind long-running tool calls.
+    """
+    api_key = settings.ANTHROPIC_API_KEY
+    if not api_key:
+        logger.warning("Next greeting: no ANTHROPIC_API_KEY, skipping")
+        return
+
+    url = f"{settings.ANTHROPIC_BASE_URL.rstrip('/')}/v1/messages"
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                OPENCLAW_URL,
-                headers={
-                    "Authorization": f"Bearer {settings.OPENCLAW_GATEWAY_TOKEN}",
-                    "x-openclaw-session-key": session_key,
-                },
-                json={
-                    "model": settings.AGENT_THINK_MODEL,
-                    "messages": [
-                        {"role": "user", "content": GREETING_GENERATION_PROMPT}
-                    ],
-                    "stream": False,
-                },
-                timeout=15.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            greeting = data["choices"][0]["message"]["content"].strip()
-            if greeting:
-                NEXT_GREETING_PATH.write_text(greeting)
-                logger.info("Next greeting saved: %s", greeting[:80])
+        async with asyncio.timeout(GREETING_TIMEOUT_S):
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                    },
+                    json={
+                        "model": GREETING_MODEL,
+                        "max_tokens": 100,
+                        "messages": [
+                            {"role": "user", "content": GREETING_GENERATION_PROMPT}
+                        ],
+                    },
+                    timeout=GREETING_TIMEOUT_S,
+                )
+                if resp.status_code != 200:
+                    logger.warning("Next greeting: Anthropic returned %d: %s", resp.status_code, resp.text[:200])
+                    return
+
+                data = resp.json()
+                content_blocks = data.get("content", [])
+                greeting = ""
+                for block in content_blocks:
+                    if block.get("type") == "text":
+                        greeting = block.get("text", "").strip()
+                        break
+
+                if greeting:
+                    NEXT_GREETING_PATH.write_text(greeting)
+                    logger.info("Next greeting saved: %s", greeting[:80])
+                else:
+                    logger.warning("Next greeting: empty response from Anthropic")
+    except (asyncio.TimeoutError, TimeoutError):
+        logger.warning("Next greeting: timed out after %.1fs", GREETING_TIMEOUT_S)
     except Exception:
         logger.exception("Failed to generate next greeting")
 
