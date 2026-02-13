@@ -1,0 +1,59 @@
+{
+  "env": {
+    "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
+  },
+  "gateway": {
+    "reload": { "mode": "hybrid", "debounceMs": 300 },
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "http": {
+      "endpoints": {
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "litellm": {
+        "baseUrl": "${ANTHROPIC_BASE_URL}",
+        "api": "anthropic-messages",
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "models": [
+          { "id": "claude-opus-4-5", "name": "Claude Opus 4.5" },
+          { "id": "claude-sonnet-4-5-20250929", "name": "Claude Sonnet 4.5" },
+          { "id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5" }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "~/.openclaw/workspace",
+      "heartbeat": {
+        "every": "30m",
+        "target": "last"
+      },
+      "model": {
+        "primary": "litellm/claude-haiku-4-5"
+      },
+      "models": {
+        "litellm/claude-haiku-4-5": { "alias": "Haiku" }
+      }
+    }
+  },
+  "cron": {
+    "enabled": true,
+    "maxConcurrentRuns": 2,
+    "sessionRetention": "24h"
+  },
+  "channels": {
+    "defaults": {
+      "groupPolicy": "open"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+app = "deepclaw-instance"
+primary_region = "sjc"
+
+[build]
+dockerfile = "Deepgram/Dockerfile"
+
+[env]
+HOME = "/home/node"
+
+[processes]
+app = ""
+
+[[services]]
+internal_port = 8000
+protocol = "tcp"
+processes = ["app"]
+
+[[services.ports]]
+port = 443
+handlers = ["tls", "http"]
+
+[[services.ports]]
+port = 80
+handlers = ["http"]
+
+[[services.http_checks]]
+interval = "30s"
+grace_period = "10s"
+method = "GET"
+path = "/health"
+timeout = "5s"
+
+[[vm]]
+size = "shared-cpu-2x"
+memory = "2048mb"
+
+[mounts]
+source = "openclaw_home"
+destination = "/home/node"
+auto_extend_size_threshold = 80
+auto_extend_size_increment = "1GB"
