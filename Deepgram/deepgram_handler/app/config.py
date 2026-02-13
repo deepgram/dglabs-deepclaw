@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     # Control plane proxy URL (for outbound SMS)
     TWILIO_PROXY_URL: str = ""
 
+    # Filler phrases (for voice call dead-air prevention)
+    FILLER_THRESHOLD_MS: int = 1500
+    FILLER_PHRASES: str = ""
+    FILLER_DYNAMIC: bool = True
+    ANTHROPIC_API_KEY: str = ""
+
+    @property
+    def filler_phrases_list(self) -> list[str]:
+        if not self.FILLER_PHRASES:
+            return []
+        return [p.strip() for p in self.FILLER_PHRASES.split(",") if p.strip()]
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
