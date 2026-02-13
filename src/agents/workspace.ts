@@ -341,38 +341,27 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
   const entries: Array<{
     name: WorkspaceBootstrapFileName;
     filePath: string;
-  }> = [
-    {
-      name: DEFAULT_AGENTS_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_AGENTS_FILENAME),
-    },
-    {
-      name: DEFAULT_SOUL_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_SOUL_FILENAME),
-    },
-    {
-      name: DEFAULT_TOOLS_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_TOOLS_FILENAME),
-    },
-    {
-      name: DEFAULT_IDENTITY_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_IDENTITY_FILENAME),
-    },
-    {
-      name: DEFAULT_USER_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_USER_FILENAME),
-    },
-    {
-      name: DEFAULT_HEARTBEAT_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_HEARTBEAT_FILENAME),
-    },
-    {
-      name: DEFAULT_BOOTSTRAP_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_BOOTSTRAP_FILENAME),
-    },
-  ];
+  }> = BOOTSTRAP_FILE_REGISTRY.filter((e) => e.required).map((e) => ({
+    name: e.name as WorkspaceBootstrapFileName,
+    filePath: path.join(resolvedDir, e.name),
+  }));
 
+  // Memory files get special handling (lowercase alias + dedup).
   entries.push(...(await resolveMemoryBootstrapEntries(resolvedDir)));
+
+  // Optional files — only included when they exist on disk.
+  const optionalFiles = BOOTSTRAP_FILE_REGISTRY.filter(
+    (e) => !e.required && e.name !== DEFAULT_MEMORY_FILENAME,
+  );
+  for (const entry of optionalFiles) {
+    const filePath = path.join(resolvedDir, entry.name);
+    try {
+      await fs.access(filePath);
+      entries.push({ name: entry.name as WorkspaceBootstrapFileName, filePath });
+    } catch {
+      // Not yet created — skip silently.
+    }
+  }
 
   const result: WorkspaceBootstrapFile[] = [];
   for (const entry of entries) {
