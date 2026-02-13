@@ -224,6 +224,18 @@ export async function handleTwilioSmsWebhookRequest(
 
   let selected: WebhookTarget | undefined;
   for (const target of targets) {
+    // Skip signature verification when running behind a proxy (TWILIO_SMS_PROXY_URL).
+    // The proxy already received the legitimate Twilio request; re-verifying
+    // the signature on the internal hop is unnecessary and will fail because
+    // the X-Twilio-Signature header is not forwarded.
+    if (target.account.proxyUrl) {
+      console.log(
+        `[twilio-sms] signature verification skipped (proxy mode, account=${target.account.accountId})`,
+      );
+      selected = target;
+      break;
+    }
+
     const verification = verifyTwilioWebhook({
       authToken: target.account.authToken,
       signature: signatureStr,
@@ -582,7 +594,8 @@ async function deliverTwilioSmsReply(params: {
         await sendTwilioSms({ account, to, text: chunk });
         statusSink?.({ lastOutboundAt: Date.now() });
       } catch (err) {
-        runtime.error?.(`Twilio SMS message send failed: ${String(err)}`);
+        const cause = err instanceof Error && err.cause ? ` cause=${String(err.cause)}` : "";
+        runtime.error?.(`Twilio SMS message send failed: ${String(err)}${cause}`);
       }
     }
   }

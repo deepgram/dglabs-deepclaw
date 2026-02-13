@@ -12,6 +12,12 @@
     "lastRunCommand": "configure",
     "lastRunMode": "local"
   },
+  "bindings": [
+    {
+      "agentId": "voice-agent",
+      "match": { "channel": "twilio-sms", "accountId": "*" }
+    }
+  ],
   "agents": {
     "defaults": {
       "model": {
