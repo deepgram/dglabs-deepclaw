@@ -642,7 +642,8 @@ export class DeepgramMediaBridge {
         }
       }
       // Notify child sessions spawned during this call (fire-and-forget)
-      void this.notifyChildSessions(session.callId, agentId);
+      const callerNumber = callRecord.direction === "inbound" ? callRecord.from : callRecord.to;
+      void this.notifyChildSessions(session.callId, agentId, callerNumber);
     }
   }
 
@@ -652,10 +653,20 @@ export class DeepgramMediaBridge {
    * set to this call's session key. We query for them and send a message so they
    * can fall back to SMS delivery instead of trying to announce to the ended call.
    */
-  private async notifyChildSessions(callSid: string, agentId: string): Promise<void> {
-    if (!this.config.gatewayUrl || !this.config.gatewayToken) return;
+  private async notifyChildSessions(
+    callSid: string,
+    agentId: string,
+    callerNumber?: string,
+  ): Promise<void> {
+    if (!this.config.gatewayUrl || !this.config.gatewayToken) {
+      console.log(`[DeepgramBridge] Skipping child session notification: no gateway config`);
+      return;
+    }
 
     const voiceSessionKey = `agent:${agentId}:voice:${callSid}`;
+    console.log(
+      `[DeepgramBridge] Querying child sessions for ${voiceSessionKey} (caller=${callerNumber ?? "unknown"})`,
+    );
     try {
       const deps = await loadCoreAgentDeps();
       const result = await deps.callGateway<{ sessions: Array<{ key: string }> }>({
@@ -672,30 +683,40 @@ export class DeepgramMediaBridge {
       });
 
       const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
-      if (sessions.length === 0) return;
+      if (sessions.length === 0) {
+        console.log(`[DeepgramBridge] No child sessions found for ${voiceSessionKey}`);
+        return;
+      }
 
-      console.log(`[DeepgramBridge] Notifying ${sessions.length} child session(s) of call end`);
+      console.log(
+        `[DeepgramBridge] Notifying ${sessions.length} child session(s) of call end: ${sessions.map((s) => s.key).join(", ")}`,
+      );
 
       for (const session of sessions) {
         try {
+          const notificationMessage = callerNumber
+            ? `The voice call has ended — the caller is no longer on the phone. Send your results via SMS instead: use the message tool with action "send", channel "twilio-sms", and target "${callerNumber}".`
+            : "The voice call has ended — the caller is no longer on the phone. If you have results to deliver, send them via SMS using the message tool instead.";
           await deps.callGateway({
             url: this.config.gatewayUrl,
             token: this.config.gatewayToken,
             method: "agent",
             params: {
-              message:
-                "The voice call has ended — the caller is no longer on the phone. If you have results to deliver, send them via SMS using the message tool instead.",
+              message: notificationMessage,
               sessionKey: session.key,
               idempotencyKey: crypto.randomUUID(),
             },
             timeoutMs: 10_000,
           });
+          console.log(
+            `[DeepgramBridge] Notified child session ${session.key} (hasCallerNumber=${!!callerNumber})`,
+          );
         } catch (err) {
           console.warn(`[DeepgramBridge] Failed to notify child session ${session.key}:`, err);
         }
       }
     } catch (err) {
-      console.warn(`[DeepgramBridge] Failed to query child sessions:`, err);
+      console.warn(`[DeepgramBridge] Failed to query child sessions for ${voiceSessionKey}:`, err);
     }
   }
 

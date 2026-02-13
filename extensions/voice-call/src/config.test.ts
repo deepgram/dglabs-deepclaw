@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { validateProviderConfig, resolveVoiceCallConfig, type VoiceCallConfig } from "./config.js";
+import {
+  SessionTimerConfigSchema,
+  validateProviderConfig,
+  resolveVoiceCallConfig,
+  type VoiceCallConfig,
+} from "./config.js";
 
 function createBaseConfig(provider: "telnyx" | "twilio" | "plivo" | "mock"): VoiceCallConfig {
   return {
@@ -35,6 +40,18 @@ function createBaseConfig(provider: "telnyx" | "twilio" | "plivo" | "mock"): Voi
     tts: { provider: "openai", model: "gpt-4o-mini-tts", voice: "coral" },
     responseModel: "openai/gpt-4o-mini",
     responseTimeoutMs: 30000,
+    sessionTimers: {
+      enabled: true,
+      responseReengageMs: 15000,
+      responseExitMs: 45000,
+      idlePromptMs: 30000,
+      idleExitMs: 15000,
+      responseReengageMessage:
+        "I'm having trouble with that one. Could you try asking differently?",
+      responseExitMessage: "I'm sorry, I can't respond right now. Talk to you later. Goodbye.",
+      idlePromptMessage: "Are you still there?",
+      idleExitMessage: "Alright, I'll let you go. Call back anytime. Goodbye.",
+    },
   };
 }
 
@@ -230,5 +247,38 @@ describe("validateProviderConfig", () => {
       expect(result.valid).toBe(true);
       expect(result.errors).toEqual([]);
     });
+  });
+});
+
+describe("SessionTimerConfigSchema", () => {
+  it("applies correct defaults when given empty object", () => {
+    const result = SessionTimerConfigSchema.parse({});
+
+    expect(result).toEqual({
+      enabled: true,
+      responseReengageMs: 15_000,
+      responseExitMs: 45_000,
+      idlePromptMs: 30_000,
+      idleExitMs: 15_000,
+      responseReengageMessage:
+        "I'm having trouble with that one. Could you try asking differently?",
+      responseExitMessage: "I'm sorry, I can't respond right now. Talk to you later. Goodbye.",
+      idlePromptMessage: "Are you still there?",
+      idleExitMessage: "Alright, I'll let you go. Call back anytime. Goodbye.",
+    });
+  });
+
+  it("allows overriding individual fields", () => {
+    const result = SessionTimerConfigSchema.parse({
+      enabled: false,
+      responseReengageMs: 20_000,
+      idlePromptMessage: "Hello?",
+    });
+
+    expect(result.enabled).toBe(false);
+    expect(result.responseReengageMs).toBe(20_000);
+    expect(result.idlePromptMessage).toBe("Hello?");
+    // Other fields still have defaults
+    expect(result.responseExitMs).toBe(45_000);
   });
 });

@@ -381,6 +381,39 @@ export const VoiceCallStreamingConfigSchema = z
 export type VoiceCallStreamingConfig = z.infer<typeof VoiceCallStreamingConfigSchema>;
 
 // -----------------------------------------------------------------------------
+// Session Timer Configuration
+// -----------------------------------------------------------------------------
+
+export const SessionTimerConfigSchema = z
+  .object({
+    /** Enable session timers (response timeout + idle caller detection) */
+    enabled: z.boolean().default(true),
+    /** Time (ms) after user speaks before injecting a re-engage message */
+    responseReengageMs: z.number().int().nonnegative().default(15_000),
+    /** Time (ms) after user speaks before injecting exit message and hanging up */
+    responseExitMs: z.number().int().nonnegative().default(45_000),
+    /** Time (ms) after agent finishes speaking before prompting idle caller */
+    idlePromptMs: z.number().int().nonnegative().default(30_000),
+    /** Time (ms) after idle prompt before hanging up */
+    idleExitMs: z.number().int().nonnegative().default(15_000),
+    /** Message injected when agent takes too long to respond */
+    responseReengageMessage: z
+      .string()
+      .default("I'm having trouble with that one. Could you try asking differently?"),
+    /** Message injected before hanging up due to agent stall */
+    responseExitMessage: z
+      .string()
+      .default("I'm sorry, I can't respond right now. Talk to you later. Goodbye."),
+    /** Message injected to prompt an idle caller */
+    idlePromptMessage: z.string().default("Are you still there?"),
+    /** Message injected before hanging up due to idle caller */
+    idleExitMessage: z.string().default("Alright, I'll let you go. Call back anytime. Goodbye."),
+  })
+  .strict()
+  .default({});
+export type SessionTimerConfig = z.infer<typeof SessionTimerConfigSchema>;
+
+// -----------------------------------------------------------------------------
 // Main Voice Call Configuration
 // -----------------------------------------------------------------------------
 
@@ -484,6 +517,9 @@ export const VoiceCallConfigSchema = z
 
     /** Timeout for response generation in ms (default 30s) */
     responseTimeoutMs: z.number().int().positive().default(30000),
+
+    /** Session timer configuration (response timeout + idle caller detection) */
+    sessionTimers: SessionTimerConfigSchema,
 
     /** Post-call summary configuration */
     callSummary: CallSummaryConfigSchema,

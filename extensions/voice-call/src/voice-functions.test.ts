@@ -8,15 +8,16 @@ import {
 } from "./voice-functions.js";
 
 describe("voice function definitions", () => {
-  it("buildVoiceAgentFunctions returns all four functions", () => {
+  it("buildVoiceAgentFunctions returns all five functions", () => {
     const fns = buildVoiceAgentFunctions();
 
-    expect(fns).toHaveLength(4);
+    expect(fns).toHaveLength(5);
     const names = fns.map((f) => f.name);
     expect(names).toContain("sessions_spawn");
     expect(names).toContain("sessions_send");
     expect(names).toContain("session_status");
     expect(names).toContain("voice_handoff");
+    expect(names).toContain("end_call");
   });
 
   it("sessions_spawn has required 'task' parameter", () => {

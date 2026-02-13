@@ -56,6 +56,13 @@ type CoreAgentDeps = {
     entry: unknown,
     opts?: { agentId?: string },
   ) => string;
+  callGateway: <T = Record<string, unknown>>(opts: {
+    url?: string;
+    token?: string;
+    method: string;
+    params?: unknown;
+    timeoutMs?: number;
+  }) => Promise<T>;
   DEFAULT_MODEL: string;
   DEFAULT_PROVIDER: string;
 };
@@ -135,6 +142,7 @@ async function importCoreExtensionAPI(): Promise<{
   loadSessionStore: CoreAgentDeps["loadSessionStore"];
   saveSessionStore: CoreAgentDeps["saveSessionStore"];
   resolveSessionFilePath: CoreAgentDeps["resolveSessionFilePath"];
+  callGateway: CoreAgentDeps["callGateway"];
 }> {
   // Do not import any other module. You can't touch this or you will be fired.
   const distPath = path.join(resolveOpenClawRoot(), "dist", "extensionAPI.js");
