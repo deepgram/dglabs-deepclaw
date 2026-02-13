@@ -7,15 +7,10 @@ import {
   resolveAgentWorkspaceDir,
 } from "../../agents/agent-scope.js";
 import {
-  DEFAULT_AGENTS_FILENAME,
-  DEFAULT_BOOTSTRAP_FILENAME,
-  DEFAULT_HEARTBEAT_FILENAME,
+  BOOTSTRAP_FILE_REGISTRY,
   DEFAULT_IDENTITY_FILENAME,
   DEFAULT_MEMORY_ALT_FILENAME,
   DEFAULT_MEMORY_FILENAME,
-  DEFAULT_SOUL_FILENAME,
-  DEFAULT_TOOLS_FILENAME,
-  DEFAULT_USER_FILENAME,
   ensureAgentWorkspace,
 } from "../../agents/workspace.js";
 import { movePathToTrash } from "../../browser/trash.js";
@@ -43,19 +38,14 @@ import {
 } from "../protocol/index.js";
 import { listAgentsForGateway } from "../session-utils.js";
 
-const BOOTSTRAP_FILE_NAMES = [
-  DEFAULT_AGENTS_FILENAME,
-  DEFAULT_SOUL_FILENAME,
-  DEFAULT_TOOLS_FILENAME,
-  DEFAULT_IDENTITY_FILENAME,
-  DEFAULT_USER_FILENAME,
-  DEFAULT_HEARTBEAT_FILENAME,
-  DEFAULT_BOOTSTRAP_FILENAME,
-] as const;
+const BOOTSTRAP_FILE_NAMES = BOOTSTRAP_FILE_REGISTRY.filter((e) => e.required && e.template).map(
+  (e) => e.name,
+);
 
-const MEMORY_FILE_NAMES = [DEFAULT_MEMORY_FILENAME, DEFAULT_MEMORY_ALT_FILENAME] as const;
-
-const ALLOWED_FILE_NAMES = new Set<string>([...BOOTSTRAP_FILE_NAMES, ...MEMORY_FILE_NAMES]);
+const ALLOWED_FILE_NAMES = new Set<string>([
+  ...BOOTSTRAP_FILE_REGISTRY.map((e) => e.name),
+  DEFAULT_MEMORY_ALT_FILENAME,
+]);
 
 type FileMeta = {
   size: number;
