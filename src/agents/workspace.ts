@@ -20,14 +20,124 @@ export function resolveDefaultAgentWorkspaceDir(
 }
 
 export const DEFAULT_AGENT_WORKSPACE_DIR = resolveDefaultAgentWorkspaceDir();
-export const DEFAULT_AGENTS_FILENAME = "AGENTS.md";
-export const DEFAULT_SOUL_FILENAME = "SOUL.md";
-export const DEFAULT_TOOLS_FILENAME = "TOOLS.md";
-export const DEFAULT_IDENTITY_FILENAME = "IDENTITY.md";
-export const DEFAULT_USER_FILENAME = "USER.md";
-export const DEFAULT_HEARTBEAT_FILENAME = "HEARTBEAT.md";
-export const DEFAULT_BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
-export const DEFAULT_MEMORY_FILENAME = "MEMORY.md";
+
+// ---------------------------------------------------------------------------
+// Bootstrap file registry
+// ---------------------------------------------------------------------------
+
+type SessionType = "main" | "subagent";
+
+type BootstrapFileEntry = {
+  readonly name: string;
+  readonly required: boolean;
+  readonly template: boolean;
+  readonly sessions: readonly SessionType[];
+  readonly notes: string;
+};
+
+export const BOOTSTRAP_FILE_REGISTRY: readonly BootstrapFileEntry[] = [
+  {
+    name: "AGENTS.md",
+    required: true,
+    template: true,
+    sessions: ["main", "subagent"],
+    notes: "Agent routing config and multi-agent instructions.",
+  },
+  {
+    name: "SOUL.md",
+    required: true,
+    template: true,
+    sessions: ["main"],
+    notes: "Personality, tone, and behavioral guidelines.",
+  },
+  {
+    name: "TOOLS.md",
+    required: true,
+    template: true,
+    sessions: ["main", "subagent"],
+    notes: "Tool usage guidance and constraints.",
+  },
+  {
+    name: "IDENTITY.md",
+    required: true,
+    template: true,
+    sessions: ["main"],
+    notes: "Agent name, owner, and branding.",
+  },
+  {
+    name: "USER.md",
+    required: true,
+    template: true,
+    sessions: ["main"],
+    notes: "User profile built up over conversations.",
+  },
+  {
+    name: "HEARTBEAT.md",
+    required: true,
+    template: true,
+    sessions: ["main"],
+    notes: "Proactive check-in schedule and cadence.",
+  },
+  {
+    name: "BOOTSTRAP.md",
+    required: true,
+    template: true,
+    sessions: ["main"],
+    notes: "First-run onboarding script. Removed once USER.md has real data.",
+  },
+  {
+    name: "CALLS.md",
+    required: false,
+    template: false,
+    sessions: ["main"],
+    notes: "Voice call log. Written by the voice-call extension after each call.",
+  },
+  {
+    name: "MEMORY.md",
+    required: false,
+    template: false,
+    sessions: ["main"],
+    notes: "Long-term memory store. Created by memory-core plugin.",
+  },
+  {
+    name: "OBSERVATIONS.md",
+    required: false,
+    template: false,
+    sessions: ["main"],
+    notes: "Auto-generated insights. Written by the observational-memory hook.",
+  },
+  {
+    name: "CALENDAR.md",
+    required: false,
+    template: false,
+    sessions: ["main"],
+    notes: "Cached Google Calendar events. Written by the calendar-cache plugin.",
+  },
+] as const;
+
+// ---------------------------------------------------------------------------
+// Derived constants (backwards-compatible exports)
+// ---------------------------------------------------------------------------
+
+function findEntry(name: string): BootstrapFileEntry {
+  const entry = BOOTSTRAP_FILE_REGISTRY.find((e) => e.name === name);
+  if (!entry) {
+    throw new Error(`Bootstrap file not in registry: ${name}`);
+  }
+  return entry;
+}
+
+export const DEFAULT_AGENTS_FILENAME = findEntry("AGENTS.md").name;
+export const DEFAULT_SOUL_FILENAME = findEntry("SOUL.md").name;
+export const DEFAULT_TOOLS_FILENAME = findEntry("TOOLS.md").name;
+export const DEFAULT_IDENTITY_FILENAME = findEntry("IDENTITY.md").name;
+export const DEFAULT_USER_FILENAME = findEntry("USER.md").name;
+export const DEFAULT_HEARTBEAT_FILENAME = findEntry("HEARTBEAT.md").name;
+export const DEFAULT_BOOTSTRAP_FILENAME = findEntry("BOOTSTRAP.md").name;
+export const DEFAULT_MEMORY_FILENAME = findEntry("MEMORY.md").name;
+export const DEFAULT_CALLS_FILENAME = findEntry("CALLS.md").name;
+export const DEFAULT_OBSERVATIONS_FILENAME = findEntry("OBSERVATIONS.md").name;
+export const DEFAULT_CALENDAR_FILENAME = findEntry("CALENDAR.md").name;
 export const DEFAULT_MEMORY_ALT_FILENAME = "memory.md";
 
 function stripFrontMatter(content: string): string {
@@ -58,15 +168,16 @@ async function loadTemplate(name: string): Promise<string> {
 }
 
 export type WorkspaceBootstrapFileName =
-  | typeof DEFAULT_AGENTS_FILENAME
-  | typeof DEFAULT_SOUL_FILENAME
-  | typeof DEFAULT_TOOLS_FILENAME
-  | typeof DEFAULT_IDENTITY_FILENAME
-  | typeof DEFAULT_USER_FILENAME
-  | typeof DEFAULT_HEARTBEAT_FILENAME
-  | typeof DEFAULT_BOOTSTRAP_FILENAME
-  | typeof DEFAULT_MEMORY_FILENAME
+  | (typeof BOOTSTRAP_FILE_REGISTRY)[number]["name"]
   | typeof DEFAULT_MEMORY_ALT_FILENAME;
+
+function buildSessionAllowlist(sessionType: SessionType): Set<string> {
+  return new Set(
+    BOOTSTRAP_FILE_REGISTRY.filter((e) => e.sessions.includes(sessionType)).map((e) => e.name),
+  );
+}
+
+const SUBAGENT_BOOTSTRAP_ALLOWLIST = buildSessionAllowlist("subagent");
 
 export type WorkspaceBootstrapFile = {
   name: WorkspaceBootstrapFileName;
@@ -291,8 +402,6 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
   }
   return result;
 }
-
-const SUBAGENT_BOOTSTRAP_ALLOWLIST = new Set([DEFAULT_AGENTS_FILENAME, DEFAULT_TOOLS_FILENAME]);
 
 export function filterBootstrapFilesForSession(
   files: WorkspaceBootstrapFile[],
