@@ -175,7 +175,7 @@ def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
             sections.append("first_caller_nudge")
     if is_first:
         sections.append("bootstrap")
-    logger.debug("Prompt sections: %s", ", ".join(sections))
+    logger.info("Prompt sections: %s", ", ".join(sections))
 
     return "\n".join(lines), is_first
 
@@ -215,6 +215,72 @@ async def _generate_next_greeting(settings: Settings, session_key: str) -> None:
                 logger.info("Next greeting saved: %s", greeting[:80])
     except Exception:
         logger.exception("Failed to generate next greeting")
+
+
+async def _notify_child_sessions(
+    settings: Settings,
+    session_key: str,
+    caller_number: str | None = None,
+) -> None:
+    """Notify child sessions that the voice call has ended.
+
+    Queries the gateway for sessions spawned by this voice call and sends
+    each one a message instructing it to deliver results via SMS instead.
+    """
+    from app.services.gateway import call_gateway
+
+    try:
+        result = await call_gateway(
+            method="sessions.list",
+            params={
+                "spawnedBy": session_key,
+                "limit": 50,
+                "includeGlobal": False,
+                "includeUnknown": False,
+            },
+            gateway_url="http://localhost:18789",
+            gateway_token=settings.OPENCLAW_GATEWAY_TOKEN,
+            timeout=5.0,
+        )
+
+        if not result:
+            return
+
+        sessions = result.get("sessions", [])
+        if not sessions:
+            return
+
+        logger.info("Notifying %d child session(s) that call ended", len(sessions))
+
+        for session in sessions:
+            child_key = session.get("key", "")
+            if not child_key:
+                continue
+
+            if caller_number:
+                message = (
+                    f"The voice call has ended — the caller is no longer on the phone. "
+                    f'Send your results via SMS instead: use the twilio action with target "{caller_number}".'
+                )
+            else:
+                message = (
+                    "The voice call has ended — the caller is no longer on the phone. "
+                    "If you have results to deliver, send them via SMS using the twilio action."
+                )
+
+            await call_gateway(
+                method="agent",
+                params={
+                    "message": message,
+                    "sessionKey": child_key,
+                },
+                gateway_url="http://localhost:18789",
+                gateway_token=settings.OPENCLAW_GATEWAY_TOKEN,
+                timeout=10.0,
+            )
+
+    except Exception:
+        logger.exception("Failed to notify child sessions")
 
 
 def build_settings_config(
@@ -562,6 +628,13 @@ async def run_agent_bridge(
 
             # Greeting generation (existing)
             await _generate_next_greeting(settings, session_key=session_key)
+
+            # Notify child sessions that the call ended (fire-and-forget)
+            if session_key:
+                try:
+                    await _notify_child_sessions(settings, session_key, caller_phone)
+                except Exception:
+                    logger.debug("Child session notification failed", exc_info=True)
 
             # Post-call extraction pipeline
             if transcript and settings.POST_CALL_EXTRACTION:
