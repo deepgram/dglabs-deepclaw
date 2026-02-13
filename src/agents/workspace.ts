@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { resolveRequiredHomeDir } from "../infra/home-dir.js";
 import { runCommandWithTimeout } from "../process/exec.js";
-import { isSubagentSessionKey } from "../routing/session-key.js";
+import { isSubagentSessionKey, isVoiceSessionKey } from "../routing/session-key.js";
 import { resolveUserPath } from "../utils.js";
 import { resolveWorkspaceTemplateDir } from "./workspace-templates.js";
 
@@ -25,7 +25,7 @@ export const DEFAULT_AGENT_WORKSPACE_DIR = resolveDefaultAgentWorkspaceDir();
 // Bootstrap file registry
 // ---------------------------------------------------------------------------
 
-type SessionType = "main" | "subagent";
+type SessionType = "main" | "subagent" | "voice";
 
 type BootstrapFileEntry = {
   readonly name: string;
@@ -47,28 +47,28 @@ export const BOOTSTRAP_FILE_REGISTRY: readonly BootstrapFileEntry[] = [
     name: "SOUL.md",
     required: true,
     template: true,
-    sessions: ["main"],
+    sessions: ["main", "voice"],
     notes: "Personality, tone, and behavioral guidelines.",
   },
   {
     name: "TOOLS.md",
     required: true,
     template: true,
-    sessions: ["main", "subagent"],
+    sessions: ["main", "subagent", "voice"],
     notes: "Tool usage guidance and constraints.",
   },
   {
     name: "IDENTITY.md",
     required: true,
     template: true,
-    sessions: ["main"],
+    sessions: ["main", "voice"],
     notes: "Agent name, owner, and branding.",
   },
   {
     name: "USER.md",
     required: true,
     template: true,
-    sessions: ["main"],
+    sessions: ["main", "voice"],
     notes: "User profile built up over conversations.",
   },
   {
@@ -89,7 +89,7 @@ export const BOOTSTRAP_FILE_REGISTRY: readonly BootstrapFileEntry[] = [
     name: "CALLS.md",
     required: false,
     template: false,
-    sessions: ["main"],
+    sessions: ["main", "voice"],
     notes: "Voice call log. Written by the voice-call extension after each call.",
   },
   {
@@ -384,8 +384,15 @@ export function filterBootstrapFilesForSession(
   files: WorkspaceBootstrapFile[],
   sessionKey?: string,
 ): WorkspaceBootstrapFile[] {
-  if (!sessionKey || !isSubagentSessionKey(sessionKey)) {
+  if (!sessionKey) {
     return files;
   }
-  return files.filter((file) => SUBAGENT_BOOTSTRAP_ALLOWLIST.has(file.name));
+  if (isSubagentSessionKey(sessionKey)) {
+    return files.filter((file) => SUBAGENT_BOOTSTRAP_ALLOWLIST.has(file.name));
+  }
+  if (isVoiceSessionKey(sessionKey)) {
+    const voiceAllowlist = buildSessionAllowlist("voice");
+    return files.filter((file) => voiceAllowlist.has(file.name));
+  }
+  return files;
 }
