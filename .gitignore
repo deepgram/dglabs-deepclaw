@@ -64,8 +64,8 @@ apps/ios/*.mobileprovision
 
 # Local untracked files
 .local/
-IDENTITY.md
-USER.md
+/IDENTITY.md
+/USER.md
 .tgz
 
 # local tooling
@@ -76,3 +76,15 @@ USER.md
 .agent/*.json
 !.agent/workflows/
 local/
+
+# Runtime data — sandboxes and bind-mount data
+data/sandboxes/
+data/deepclaw/
+
+# Workspace runtime artifacts (keep seed templates, ignore generated state)
+data/workspace/memory/
+data/workspace/**/memory/
+data/workspace/MEMORY.md
+data/workspace/**/CALLS.md
+data/workspace/**/.git/
+data/workspace/skills/
