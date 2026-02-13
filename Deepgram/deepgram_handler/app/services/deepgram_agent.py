@@ -8,7 +8,9 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -19,56 +21,144 @@ from websockets.exceptions import ConnectionClosed
 
 from app.config import Settings, get_settings
 from app.services import session_registry
+from app.services.agent_identity import extract_agent_identity
+from app.services.call_summary import generate_call_summary
 from app.services.twilio_media import (
     build_clear_event,
     build_media_event,
     extract_audio_from_media_event,
     parse_twilio_event,
 )
+from app.services.user_md_parser import (
+    has_values,
+    is_blank_identity,
+    parse_calls_md,
+    parse_user_markdown,
+)
+from app.services.user_profile import extract_user_profile
+from app.services.workspace import CallInfo, TranscriptEntry
 
 logger = logging.getLogger(__name__)
 
-USER_MD_PATH = Path.home() / ".openclaw" / "workspace" / "USER.md"
-NEXT_GREETING_PATH = Path.home() / ".openclaw" / "workspace" / "NEXT_GREETING.txt"
-
-VOICE_FORMAT_RULES = (
-    "IMPORTANT: Your responses will be spoken aloud via text-to-speech. Do NOT use any text formatting — "
-    "no markdown, no bullet points, no asterisks, no numbered lists, no headers. "
-    "Write plain conversational sentences only. "
-    "Keep responses brief and conversational (1-2 sentences max). "
-    'Do NOT start your response with filler phrases like "Let me check" or "One moment" — '
-    "that is handled automatically. Jump straight into the answer."
-    "If you are asked to text or call, use the twilio action"
-)
-
-KNOWN_USER_PROMPT = (
-    f"You are on a phone call. {VOICE_FORMAT_RULES} "
-    "If a request is ambiguous or you're unsure what the caller means, ask a quick clarifying question "
-    "before acting. Don't guess or add requirements they didn't ask for."
-    "If you are asked to text or call, use the twilio action"
-)
+WORKSPACE_DIR = Path.home() / ".openclaw" / "workspace"
+USER_MD_PATH = WORKSPACE_DIR / "USER.md"
+IDENTITY_MD_PATH = WORKSPACE_DIR / "IDENTITY.md"
+CALLS_MD_PATH = WORKSPACE_DIR / "test-voice-agent" / "CALLS.md"
+NEXT_GREETING_PATH = WORKSPACE_DIR / "NEXT_GREETING.txt"
 
 
-def _read_user_context() -> str | None:
-    """Read USER.md from the home directory if it exists."""
+def _read_file(path: Path) -> str | None:
+    """Read a text file if it exists and is non-empty."""
     try:
-        content = USER_MD_PATH.read_text().strip()
+        content = path.read_text().strip()
         if content:
             return content
     except (FileNotFoundError, PermissionError):
         pass
     return None
+
+
+def _read_user_context() -> str | None:
+    """Read USER.md from the workspace directory if it exists."""
+    return _read_file(USER_MD_PATH)
 
 
 def _read_next_greeting() -> str | None:
     """Read the pre-generated greeting for the next call, if it exists."""
-    try:
-        content = NEXT_GREETING_PATH.read_text().strip()
-        if content:
-            return content
-    except (FileNotFoundError, PermissionError):
-        pass
-    return None
+    return _read_file(NEXT_GREETING_PATH)
+
+
+def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
+    """Build a structured voice prompt from workspace files.
+
+    Returns a tuple of (prompt_text, is_first_caller).
+    """
+    # Read workspace files
+    user_md = _read_file(USER_MD_PATH)
+    identity_md = _read_file(IDENTITY_MD_PATH)
+    calls_md = _read_file(CALLS_MD_PATH)
+
+    # Parse USER.md
+    profile = parse_user_markdown(user_md) if user_md else None
+    profile_filled = profile is not None and has_values(profile)
+
+    # Detect first caller: no user data AND blank identity
+    is_first = not profile_filled and is_blank_identity(identity_md or "")
+
+    # Determine caller's timezone for date/time context
+    tz_label = ""
+    if profile and profile.timezone:
+        tz_label = profile.timezone
+
+    lines: list[str] = []
+
+    # -- Voice constraints --
+    lines.append("You are on a phone call. Voice constraints:")
+    lines.append("- Keep responses brief (1-2 sentences max). No markdown, plain conversational sentences only.")
+    lines.append("- Do not start with filler phrases like \"Let me check\" or \"One moment\" — jump straight into the answer.")
+    lines.append("- If a request is ambiguous, ask a quick clarifying question before acting.")
+    if tz_label:
+        now = datetime.now(timezone.utc)
+        lines.append(f"- The caller's timezone is {tz_label}. Current UTC time: {now.strftime('%Y-%m-%d %H:%M UTC')}.")
+    else:
+        now = datetime.now(timezone.utc)
+        lines.append(f"- Current UTC time: {now.strftime('%Y-%m-%d %H:%M UTC')}.")
+    lines.append("- If you are asked to text or call someone, use the twilio action.")
+
+    # -- Caller context (returning caller) --
+    if profile_filled:
+        lines.append("")
+        lines.append("Caller context:")
+        if profile.call_name or profile.name:
+            display_name = profile.call_name or profile.name
+            lines.append(f"- Caller's name: {display_name}. Greet them by name.")
+        if profile.pronouns:
+            lines.append(f"- Pronouns: {profile.pronouns}")
+        if profile.notes:
+            lines.append(f"- About them: {profile.notes}")
+        if profile.context:
+            lines.append(f"- Context: {profile.context}")
+
+        # Recent calls from CALLS.md
+        if calls_md:
+            recent = parse_calls_md(calls_md, count=3)
+            if recent:
+                lines.append("")
+                lines.append("Recent calls:")
+                for entry in recent:
+                    # Indent each line of the entry
+                    for sub_line in entry.split("\n"):
+                        lines.append(f"  {sub_line}")
+
+    # -- Action nudges --
+    if settings.ENABLE_ACTION_NUDGES:
+        lines.append("")
+        if profile_filled and not is_first:
+            window = settings.RETURNING_CALLER_NUDGE_WINDOW_SEC
+            lines.append(
+                f"Nudge: This is a returning caller. Reference a recent interaction if possible. "
+                f"Steer the conversation toward a concrete action within {window} seconds."
+            )
+        elif is_first:
+            window = settings.FIRST_CALLER_NUDGE_WINDOW_SEC
+            lines.append(
+                f"Nudge: This is a first-time caller. Offer to DO something useful for them "
+                f"within {window} seconds. Show value quickly."
+            )
+
+    # -- First-caller bootstrap --
+    if is_first:
+        lines.append("")
+        lines.append("First-caller bootstrap:")
+        lines.append("- You don't have a name yet. If the caller asks, say you haven't picked one yet.")
+        lines.append("- Within the first exchange, naturally ask their name.")
+        lines.append(
+            "- IMPORTANT: When someone says 'call me [name]', they are telling you their NAME "
+            "— not asking you to make a phone call."
+        )
+        lines.append("- Goal: names exchanged, something useful done, give them a reason to call back.")
+
+    return "\n".join(lines), is_first
 
 
 GREETING_GENERATION_PROMPT = (
@@ -137,14 +227,24 @@ def build_settings_config(
         prompt = prompt_override
         greeting = greeting_override or "Hello!"
         logger.info("Using prompt override (outbound call)")
-    elif user_context := _read_user_context():
-        prompt = f"{KNOWN_USER_PROMPT}\n\nHere is what you know about the caller:\n{user_context}"
-        greeting = _read_next_greeting() or "Welcome back! How may I help today?"
-        logger.info("Using known-user prompt (USER.md found)")
     else:
-        prompt = settings.AGENT_PROMPT
-        greeting = _read_next_greeting() or settings.AGENT_GREETING
-        logger.info("Using new-caller prompt (no USER.md)")
+        prompt, is_first = _build_voice_prompt(settings)
+        if not is_first:
+            # Returning caller — use parsed name for fallback greeting
+            user_md = _read_file(USER_MD_PATH)
+            profile = parse_user_markdown(user_md) if user_md else None
+            display_name = None
+            if profile:
+                display_name = profile.call_name or profile.name or None
+            if display_name:
+                fallback = f"Hey {display_name}!"
+            else:
+                fallback = settings.AGENT_GREETING
+            greeting = _read_next_greeting() or fallback
+            logger.info("Using known-user prompt (returning caller)")
+        else:
+            greeting = _read_next_greeting() or settings.AGENT_GREETING
+            logger.info("Using first-caller prompt (bootstrap)")
 
     return {
         "type": "Settings",
@@ -215,6 +315,7 @@ async def _deepgram_to_twilio(
     twilio_ws: WebSocket,
     stream_sid: str,
     stop_event: asyncio.Event,
+    transcript: list[TranscriptEntry] | None = None,
 ) -> None:
     """Forward audio from Deepgram to Twilio and handle agent events."""
     try:
@@ -239,6 +340,11 @@ async def _deepgram_to_twilio(
                     role = msg.get("role", "")
                     content = msg.get("content", "")
                     logger.info("Conversation [%s]: %s", role, content)
+                    if transcript is not None and content:
+                        speaker = "user" if role == "user" else "bot"
+                        transcript.append(
+                            TranscriptEntry(timestamp=time.time(), speaker=speaker, text=content)
+                        )
                 elif msg_type == "Warning":
                     logger.warning("Deepgram warning: %s", json.dumps(msg))
                 else:
@@ -264,6 +370,7 @@ async def run_agent_bridge(
     call_id: str | None = None,
     prompt_override: str | None = None,
     greeting_override: str | None = None,
+    caller_phone: str | None = None,
 ) -> None:
     """Run the Deepgram Voice Agent bridge.
 
@@ -278,6 +385,8 @@ async def run_agent_bridge(
         Custom prompt for the agent (used for outbound calls).
     greeting_override:
         Custom greeting (used for outbound calls).
+    caller_phone:
+        Caller's phone number (E.164 format) for post-call extraction.
     """
     if settings is None:
         settings = get_settings()
@@ -312,10 +421,11 @@ async def run_agent_bridge(
         session_registry.register(session_key, dg_ws)
 
         stop_event = asyncio.Event()
+        transcript: list[TranscriptEntry] = []
 
         t2d = asyncio.create_task(_twilio_to_deepgram(twilio_ws, dg_ws, stop_event))
         d2t = asyncio.create_task(
-            _deepgram_to_twilio(dg_ws, twilio_ws, stream_sid, stop_event)
+            _deepgram_to_twilio(dg_ws, twilio_ws, stream_sid, stop_event, transcript)
         )
 
         await asyncio.gather(t2d, d2t, return_exceptions=True)
@@ -329,10 +439,32 @@ async def run_agent_bridge(
         except Exception:
             pass
 
-        # Post-call: generate next greeting (inbound calls only)
+        # Post-call tasks (inbound calls only)
         if not prompt_override:
             if not session_key:
                 session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
+
+            # Greeting generation (existing)
             await _generate_next_greeting(settings, session_key=session_key)
+
+            # Post-call extraction pipeline
+            if transcript and settings.POST_CALL_EXTRACTION:
+                call_info = CallInfo(
+                    call_id=call_id,
+                    phone_number=caller_phone or "unknown",
+                    direction="inbound",
+                    ended_at=time.time(),
+                    transcript=transcript,
+                )
+                results = await asyncio.gather(
+                    generate_call_summary(settings, call_info),
+                    extract_user_profile(settings, call_info),
+                    extract_agent_identity(settings, call_info),
+                    return_exceptions=True,
+                )
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        task_names = ["call_summary", "user_profile", "agent_identity"]
+                        logger.error("[post-call] %s failed: %s", task_names[i], result)
 
     logger.info("Agent bridge finished")

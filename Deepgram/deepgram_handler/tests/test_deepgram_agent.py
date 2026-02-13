@@ -13,6 +13,65 @@ from app.services.deepgram_agent import (
 )
 
 
+def _mock_workspace_empty(monkeypatch, tmp_path):
+    """Point all workspace paths at nonexistent files (first-caller scenario)."""
+    monkeypatch.setattr("app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md")
+    monkeypatch.setattr("app.services.deepgram_agent.IDENTITY_MD_PATH", tmp_path / "nope-id.md")
+    monkeypatch.setattr("app.services.deepgram_agent.CALLS_MD_PATH", tmp_path / "nope-calls.md")
+    monkeypatch.setattr("app.services.deepgram_agent.NEXT_GREETING_PATH", tmp_path / "nope.txt")
+
+
+FILLED_USER_MD = """\
+# USER.md - About Your Human
+
+- **Name:** Bill Getman
+- **What to call them:** Bill
+- **Pronouns:** he/him
+- **Timezone:** America/New_York
+- **Notes:** Works on DeepClaw
+
+## Context
+
+Building a voice AI platform.
+"""
+
+BLANK_USER_MD = """\
+# USER.md - About Your Human
+
+- **Name:**
+- **What to call them:**
+- **Pronouns:** _(optional)_
+- **Timezone:**
+- **Notes:**
+
+## Context
+
+_(placeholder)_
+"""
+
+FILLED_IDENTITY_MD = """\
+# IDENTITY.md - Who Am I?
+
+- **Name:** Cleo
+- **Creature:** AI familiar
+"""
+
+BLANK_IDENTITY_MD = """\
+# IDENTITY.md - Who Am I?
+
+- **Name:**
+  _(pick something you like)_
+"""
+
+SAMPLE_CALLS_MD = """\
+### 2026-02-12 09:15 — Morning standup
+Discussed deployment blockers.
+
+### 2026-02-13 16:45 — Voice prompt testing
+Testing the new prompt builder.
+"""
+
+
 def test_build_settings_config_defaults():
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
@@ -66,13 +125,8 @@ def test_build_settings_config_with_fly_machine_id():
 
 
 def test_build_settings_config_custom(tmp_path, monkeypatch):
-    # Mock USER_MD_PATH to ensure new-caller branch (custom AGENT_PROMPT used)
-    monkeypatch.setattr(
-        "app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md"
-    )
-    monkeypatch.setattr(
-        "app.services.deepgram_agent.NEXT_GREETING_PATH", tmp_path / "nope.txt"
-    )
+    """Custom models, URLs, and agent ID are wired through correctly."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
 
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
@@ -82,7 +136,6 @@ def test_build_settings_config_custom(tmp_path, monkeypatch):
         AGENT_LISTEN_MODEL="nova-3",
         AGENT_THINK_MODEL="anthropic/claude-sonnet-4-5-20250929",
         AGENT_VOICE="aura-2-luna-en",
-        AGENT_PROMPT="You are a pirate.",
         AGENT_GREETING="Ahoy!",
         _env_file=None,
     )
@@ -99,8 +152,10 @@ def test_build_settings_config_custom(tmp_path, monkeypatch):
         agent["think"]["endpoint"]["headers"]["x-openclaw-session-key"]
         == "agent:custom-agent:call-99"
     )
-    assert agent["think"]["prompt"] == "You are a pirate."
+    # Inbound calls use _build_voice_prompt() — prompt contains voice constraints
+    assert "Voice constraints" in agent["think"]["prompt"] or "phone call" in agent["think"]["prompt"]
     assert agent["speak"]["provider"]["model"] == "aura-2-luna-en"
+    # No USER.md → first caller → uses settings.AGENT_GREETING as fallback
     assert agent["greeting"] == "Ahoy!"
 
 
@@ -171,13 +226,10 @@ def test_read_next_greeting_returns_none_when_empty(tmp_path, monkeypatch):
 
 def test_build_settings_uses_next_greeting_file(tmp_path, monkeypatch):
     """When NEXT_GREETING.txt exists, use it as the greeting."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
     greeting_file = tmp_path / "NEXT_GREETING.txt"
     greeting_file.write_text("So you're back. What do you need?")
     monkeypatch.setattr("app.services.deepgram_agent.NEXT_GREETING_PATH", greeting_file)
-    # Also ensure USER.md doesn't exist so we hit the new-caller branch
-    monkeypatch.setattr(
-        "app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md"
-    )
 
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
@@ -190,12 +242,7 @@ def test_build_settings_uses_next_greeting_file(tmp_path, monkeypatch):
 
 def test_build_settings_falls_back_when_no_greeting_file(tmp_path, monkeypatch):
     """When no NEXT_GREETING.txt, fall back to default greeting."""
-    monkeypatch.setattr(
-        "app.services.deepgram_agent.NEXT_GREETING_PATH", tmp_path / "nope.txt"
-    )
-    monkeypatch.setattr(
-        "app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md"
-    )
+    _mock_workspace_empty(monkeypatch, tmp_path)
 
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
@@ -479,3 +526,232 @@ async def test_run_agent_bridge_unregisters_on_error(monkeypatch):
 
     assert len(unregistered_keys) == 1
     assert "err-call" in unregistered_keys[0]
+
+
+# ---------------------------------------------------------------------------
+# Enhanced prompt builder tests
+# ---------------------------------------------------------------------------
+
+
+def test_returning_caller_prompt(tmp_path, monkeypatch):
+    """Known user with filled USER.md gets caller context in prompt."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    # Write filled USER.md
+    user_file = tmp_path / "user.md"
+    user_file.write_text(FILLED_USER_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.USER_MD_PATH", user_file)
+
+    # Write filled IDENTITY.md
+    identity_file = tmp_path / "identity.md"
+    identity_file.write_text(FILLED_IDENTITY_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.IDENTITY_MD_PATH", identity_file)
+
+    # Write CALLS.md
+    calls_file = tmp_path / "calls.md"
+    calls_file.write_text(SAMPLE_CALLS_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.CALLS_MD_PATH", calls_file)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="ret-123")
+    prompt = config["agent"]["think"]["prompt"]
+
+    # Should contain caller context
+    assert "Bill" in prompt
+    assert "Caller context" in prompt
+    assert "Works on DeepClaw" in prompt
+    assert "voice AI platform" in prompt
+
+    # Should contain recent calls
+    assert "Recent calls" in prompt
+    assert "Morning standup" in prompt
+
+    # Should contain returning caller nudge
+    assert "returning caller" in prompt.lower()
+
+    # Should NOT contain first-caller bootstrap
+    assert "First-caller bootstrap" not in prompt
+
+    # Greeting should use name
+    assert config["agent"]["greeting"] == "Hey Bill!"
+
+
+def test_first_caller_prompt(tmp_path, monkeypatch):
+    """No USER.md + blank IDENTITY.md triggers first-caller bootstrap."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    # Write blank identity
+    identity_file = tmp_path / "identity.md"
+    identity_file.write_text(BLANK_IDENTITY_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.IDENTITY_MD_PATH", identity_file)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="first-123")
+    prompt = config["agent"]["think"]["prompt"]
+
+    # Should contain bootstrap instructions
+    assert "First-caller bootstrap" in prompt
+    assert "haven't picked one yet" in prompt
+    assert "call me [name]" in prompt.lower()
+
+    # Should contain first-caller nudge
+    assert "first-time caller" in prompt.lower()
+
+    # Should NOT contain caller context
+    assert "Caller context" not in prompt
+
+
+def test_returning_caller_no_calls_md(tmp_path, monkeypatch):
+    """Known user without CALLS.md still gets caller context, no recent calls section."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    user_file = tmp_path / "user.md"
+    user_file.write_text(FILLED_USER_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.USER_MD_PATH", user_file)
+
+    identity_file = tmp_path / "identity.md"
+    identity_file.write_text(FILLED_IDENTITY_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.IDENTITY_MD_PATH", identity_file)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="ret-no-calls")
+    prompt = config["agent"]["think"]["prompt"]
+
+    assert "Caller context" in prompt
+    assert "Bill" in prompt
+    assert "Recent calls" not in prompt
+
+
+def test_action_nudges_disabled(tmp_path, monkeypatch):
+    """When ENABLE_ACTION_NUDGES=False, no nudge lines in prompt."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        ENABLE_ACTION_NUDGES=False,
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="no-nudge")
+    prompt = config["agent"]["think"]["prompt"]
+
+    assert "Nudge:" not in prompt
+
+
+def test_action_nudges_enabled_first_caller(tmp_path, monkeypatch):
+    """First caller with nudges enabled gets the first-caller nudge."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        ENABLE_ACTION_NUDGES=True,
+        FIRST_CALLER_NUDGE_WINDOW_SEC=20,
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="nudge-first")
+    prompt = config["agent"]["think"]["prompt"]
+
+    assert "first-time caller" in prompt.lower()
+    assert "20 seconds" in prompt
+
+
+def test_returning_caller_nudge_window(tmp_path, monkeypatch):
+    """Returning caller nudge uses the configured window."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    user_file = tmp_path / "user.md"
+    user_file.write_text(FILLED_USER_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.USER_MD_PATH", user_file)
+
+    identity_file = tmp_path / "identity.md"
+    identity_file.write_text(FILLED_IDENTITY_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.IDENTITY_MD_PATH", identity_file)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        RETURNING_CALLER_NUDGE_WINDOW_SEC=60,
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="nudge-ret")
+    prompt = config["agent"]["think"]["prompt"]
+
+    assert "returning caller" in prompt.lower()
+    assert "60 seconds" in prompt
+
+
+def test_prompt_contains_utc_time(tmp_path, monkeypatch):
+    """Prompt always includes current UTC time."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="time-test")
+    prompt = config["agent"]["think"]["prompt"]
+
+    assert "UTC" in prompt
+
+
+def test_prompt_contains_timezone_when_known(tmp_path, monkeypatch):
+    """When USER.md has a timezone, it appears in the prompt."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    user_file = tmp_path / "user.md"
+    user_file.write_text(FILLED_USER_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.USER_MD_PATH", user_file)
+
+    identity_file = tmp_path / "identity.md"
+    identity_file.write_text(FILLED_IDENTITY_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.IDENTITY_MD_PATH", identity_file)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="tz-test")
+    prompt = config["agent"]["think"]["prompt"]
+
+    assert "America/New_York" in prompt
+
+
+def test_blank_user_md_treated_as_first_caller(tmp_path, monkeypatch):
+    """A USER.md that exists but has only placeholders is treated as first caller."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    user_file = tmp_path / "user.md"
+    user_file.write_text(BLANK_USER_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.USER_MD_PATH", user_file)
+
+    # Blank identity too
+    identity_file = tmp_path / "identity.md"
+    identity_file.write_text(BLANK_IDENTITY_MD)
+    monkeypatch.setattr("app.services.deepgram_agent.IDENTITY_MD_PATH", identity_file)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="blank-user")
+    prompt = config["agent"]["think"]["prompt"]
+
+    # Should be first-caller (blank USER.md + blank IDENTITY.md)
+    assert "First-caller bootstrap" in prompt
+    assert "Caller context" not in prompt

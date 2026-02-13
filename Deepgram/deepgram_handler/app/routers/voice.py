@@ -43,7 +43,11 @@ async def twilio_inbound(request: Request):
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<Response>"
-        f'<Connect><Stream url="{stream_url}" /></Connect>'
+        "<Connect>"
+        f'<Stream url="{stream_url}">'
+        f'<Parameter name="caller_phone" value="{escape(str(from_number))}" />'
+        "</Stream>"
+        "</Connect>"
         "</Response>"
     )
     return Response(content=twiml, media_type="application/xml")
@@ -60,6 +64,7 @@ async def twilio_stream(websocket: WebSocket):
     logger.info("WS /twilio/stream: connection accepted")
 
     stream_sid = None
+    caller_phone = None
 
     # Buffer frames until we get the start event with stream_sid
     try:
@@ -67,8 +72,11 @@ async def twilio_stream(websocket: WebSocket):
             raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
             event = parse_twilio_event(raw)
             if event and event.get("event") == "start":
-                stream_sid = event.get("start", {}).get("streamSid", "")
-                logger.info("Stream started: streamSid=%s", stream_sid)
+                start_data = event.get("start", {})
+                stream_sid = start_data.get("streamSid", "")
+                custom = start_data.get("customParameters", {})
+                caller_phone = custom.get("caller_phone")
+                logger.info("Stream started: streamSid=%s caller=%s", stream_sid, caller_phone)
     except asyncio.TimeoutError:
         logger.error("Timed out waiting for stream start event")
         return
@@ -80,7 +88,7 @@ async def twilio_stream(websocket: WebSocket):
         logger.error("No streamSid received, closing")
         return
 
-    await run_agent_bridge(websocket, stream_sid)
+    await run_agent_bridge(websocket, stream_sid, caller_phone=caller_phone)
     logger.info("WS /twilio/stream: bridge finished")
 
 
