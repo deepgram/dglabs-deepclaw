@@ -17,6 +17,7 @@ from app.services.workspace import CallInfo, TranscriptEntry
 
 # -- normalize_value --
 
+
 def test_normalize_strips_markdown():
     assert normalize_value("**hello**") == "hello"
     assert normalize_value("_world_") == "world"
@@ -40,6 +41,7 @@ def test_normalize_em_dash():
 
 # -- is_placeholder --
 
+
 def test_is_placeholder_true():
     assert is_placeholder("_(optional)_") is True
     assert is_placeholder("(optional)") is True
@@ -56,6 +58,7 @@ def test_is_placeholder_false():
 
 
 # -- parse_user_md --
+
 
 def test_parse_user_md_full():
     content = (
@@ -120,6 +123,7 @@ def test_parse_user_md_with_frontmatter():
 
 # -- merge_user_profiles --
 
+
 def test_merge_fills_empty_fields():
     existing = UserProfile()
     extracted = UserProfile(name="Bill", call_name="Bill", timezone="UTC")
@@ -162,6 +166,7 @@ def test_merge_context_fills_empty():
 
 # -- serialize_user_md --
 
+
 def test_serialize_roundtrip():
     profile = UserProfile(
         name="Bill Getman",
@@ -188,6 +193,7 @@ def test_serialize_empty_profile():
 
 
 # -- extract_user_profile (integration) --
+
 
 @pytest.mark.asyncio
 async def test_extract_user_profile_fills_empty(tmp_path, monkeypatch):
@@ -220,7 +226,9 @@ async def test_extract_user_profile_fills_empty(tmp_path, monkeypatch):
         ],
     )
 
-    with patch("app.services.user_profile.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.user_profile.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         mock_llm.return_value = '{"name": "Bill", "callName": "Bill"}'
         await extract_user_profile(FakeSettings(), call_info)
 
@@ -257,7 +265,9 @@ async def test_extract_user_profile_skips_when_populated(tmp_path, monkeypatch):
         ],
     )
 
-    with patch("app.services.user_profile.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.user_profile.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         await extract_user_profile(FakeSettings(), call_info)
 
     # LLM should not have been called -- all key fields populated
