@@ -112,6 +112,7 @@ async def proxy_chat_completions(request: Request):
 
         # Kick off dynamic generation in parallel
         if settings.FILLER_DYNAMIC and settings.ANTHROPIC_API_KEY and user_message:
+
             async def _gen():
                 dynamic_phrase_holder[0] = await generate_filler_phrase(
                     user_message, settings.ANTHROPIC_API_KEY
@@ -130,14 +131,18 @@ async def proxy_chat_completions(request: Request):
                 return
             try:
                 logger.info("Injecting filler: %s", phrase)
-                await dg_ws.send(json.dumps({"type": "InjectAgentMessage", "message": phrase}))
+                await dg_ws.send(
+                    json.dumps({"type": "InjectAgentMessage", "message": phrase})
+                )
             except Exception:
                 logger.debug("Failed to inject filler", exc_info=True)
 
         filler_task = asyncio.create_task(_inject_filler())
 
     # --- Forward to OpenClaw ---
-    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10))
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10)
+    )
     req = client.build_request(
         "POST",
         f"{OPENCLAW_BASE}/v1/chat/completions",
