@@ -17,6 +17,7 @@ from app.services.workspace import CallInfo, TranscriptEntry
 
 # -- parse_identity_md --
 
+
 def test_parse_identity_md_full():
     content = (
         "# IDENTITY.md - Who Am I?\n\n"
@@ -60,6 +61,7 @@ def test_parse_identity_md_empty_template():
 
 # -- identity_has_values --
 
+
 def test_identity_has_values_true():
     assert identity_has_values(AgentIdentity(name="Ripley")) is True
     assert identity_has_values(AgentIdentity(emoji="\U0001f680")) is True
@@ -70,6 +72,7 @@ def test_identity_has_values_false():
 
 
 # -- merge_agent_identities --
+
 
 def test_merge_fills_empty():
     existing = AgentIdentity()
@@ -98,6 +101,7 @@ def test_merge_never_touches_avatar():
 
 # -- generic name detection --
 
+
 def test_generic_names():
     assert "assistant" in GENERIC_NAMES
     assert "ai assistant" in GENERIC_NAMES
@@ -107,8 +111,11 @@ def test_generic_names():
 
 # -- serialize/roundtrip --
 
+
 def test_serialize_roundtrip():
-    identity = AgentIdentity(name="Ember", creature="familiar", vibe="chaotic", emoji="\U0001f525")
+    identity = AgentIdentity(
+        name="Ember", creature="familiar", vibe="chaotic", emoji="\U0001f525"
+    )
     md = serialize_identity_md(identity)
     parsed = parse_identity_md(md)
     assert parsed.name == "Ember"
@@ -118,6 +125,7 @@ def test_serialize_roundtrip():
 
 
 # -- extract_agent_identity (integration) --
+
 
 @pytest.mark.asyncio
 async def test_extract_identity_fills_empty(tmp_path, monkeypatch):
@@ -148,7 +156,9 @@ async def test_extract_identity_fills_empty(tmp_path, monkeypatch):
         ],
     )
 
-    with patch("app.services.agent_identity.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.agent_identity.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         mock_llm.return_value = '{"name": "Wren", "vibe": "friendly and curious"}'
         await extract_agent_identity(FakeSettings(), call_info)
 
@@ -185,7 +195,9 @@ async def test_extract_identity_skips_when_populated(tmp_path, monkeypatch):
         ],
     )
 
-    with patch("app.services.agent_identity.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.agent_identity.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         await extract_agent_identity(FakeSettings(), call_info)
 
     mock_llm.assert_not_called()
@@ -219,7 +231,9 @@ async def test_extract_identity_discards_generic_name(tmp_path, monkeypatch):
         ],
     )
 
-    with patch("app.services.agent_identity.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.agent_identity.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         mock_llm.return_value = '{"name": "Assistant", "vibe": "helpful"}'
         await extract_agent_identity(FakeSettings(), call_info)
 

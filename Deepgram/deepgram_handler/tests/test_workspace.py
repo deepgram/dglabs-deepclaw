@@ -1,15 +1,10 @@
 # tests/test_workspace.py
-import json
-import time
-from dataclasses import dataclass
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
 from app.services.workspace import (
-    CallInfo,
     TranscriptEntry,
     call_anthropic,
     format_transcript,
@@ -22,6 +17,7 @@ from app.services.workspace import (
 
 # -- TranscriptEntry & format_transcript --
 
+
 def test_format_transcript_basic():
     entries = [
         TranscriptEntry(timestamp=1000.0, speaker="bot", text="Hello!"),
@@ -29,7 +25,9 @@ def test_format_transcript_basic():
         TranscriptEntry(timestamp=1002.0, speaker="bot", text="I'm great, thanks!"),
     ]
     result = format_transcript(entries)
-    assert result == "Agent: Hello!\nCaller: Hi, how are you?\nAgent: I'm great, thanks!"
+    assert (
+        result == "Agent: Hello!\nCaller: Hi, how are you?\nAgent: I'm great, thanks!"
+    )
 
 
 def test_format_transcript_empty():
@@ -37,6 +35,7 @@ def test_format_transcript_empty():
 
 
 # -- workspace_path --
+
 
 def test_workspace_path_main_agent(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.workspace.WORKSPACE_DIR", tmp_path)
@@ -53,10 +52,14 @@ def test_workspace_path_sub_agent(tmp_path, monkeypatch):
     class FakeSettings:
         OPENCLAW_AGENT_ID = "voice-agent"
 
-    assert workspace_path(FakeSettings(), "USER.md") == tmp_path / "voice-agent" / "USER.md"
+    assert (
+        workspace_path(FakeSettings(), "USER.md")
+        == tmp_path / "voice-agent" / "USER.md"
+    )
 
 
 # -- read_workspace_file / write_workspace_file --
+
 
 def test_read_workspace_file_exists(tmp_path):
     f = tmp_path / "TEST.md"
@@ -81,6 +84,7 @@ def test_write_workspace_file_creates_dirs(tmp_path):
 
 
 # -- parse_json_response --
+
 
 def test_parse_json_response_plain():
     result = parse_json_response('{"name": "Bill"}')
@@ -108,6 +112,7 @@ def test_parse_json_response_empty():
 
 
 # -- call_anthropic --
+
 
 @pytest.mark.asyncio
 async def test_call_anthropic_success():

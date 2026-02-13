@@ -209,10 +209,14 @@ async def extract_user_profile(settings, call_info: CallInfo) -> None:
 
         user_path = workspace_path(settings, "USER.md")
         existing_content = read_workspace_file(user_path)
-        existing_profile = parse_user_md(existing_content) if existing_content else UserProfile()
+        existing_profile = (
+            parse_user_md(existing_content) if existing_content else UserProfile()
+        )
 
         if _profile_is_populated(existing_profile):
-            logger.info("[post-call] Skipping user profile extraction: all fields populated")
+            logger.info(
+                "[post-call] Skipping user profile extraction: all fields populated"
+            )
             return
 
         prompt = PROFILE_PROMPT_TEMPLATE.format(transcript=transcript_text)
