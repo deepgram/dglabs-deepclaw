@@ -4,7 +4,7 @@ tag="deployment-"$(git describe --always)
 IMAGE="registry.fly.io/deepclaw-instance:$tag"
 
 echo "build and deploying $IMAGE"
-fly deploy .. -a deepclaw-instance --config fly.toml --ha=false --image-label $tag
+fly deploy . -a deepclaw-instance --config fly.toml --ha=false --image-label $tag
 
 echo "\n $IMAGE \n"
 

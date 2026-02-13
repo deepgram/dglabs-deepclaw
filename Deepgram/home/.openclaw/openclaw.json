@@ -48,8 +48,7 @@
   },
   "cron": {
     "enabled": true,
-    "maxConcurrentRuns": 2,
-    "sessionRetention": "24h"
+    "maxConcurrentRuns": 2
   },
   "channels": {
     "defaults": {
