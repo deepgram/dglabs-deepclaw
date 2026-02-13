@@ -44,10 +44,14 @@ async def generate_filler_phrase(user_message: str, gateway_token: str) -> str |
         logger.warning("No gateway token for filler generation, skipping")
         return None
 
-    logger.info("Generating dynamic filler for: %s", repr(user_message[:60]))
+    logger.info(
+        "Haiku filler: starting request (model=%s url=%s timeout=%.1fs)",
+        HAIKU_MODEL, GATEWAY_URL, HARD_TIMEOUT_S,
+    )
     try:
         async with asyncio.timeout(HARD_TIMEOUT_S):
             async with httpx.AsyncClient() as client:
+                logger.info("Haiku filler: sending POST to gateway...")
                 resp = await client.post(
                     GATEWAY_URL,
                     headers={
@@ -65,21 +69,33 @@ async def generate_filler_phrase(user_message: str, gateway_token: str) -> str |
                     timeout=HARD_TIMEOUT_S,
                 )
 
+                logger.info(
+                    "Haiku filler: gateway responded %d (%d bytes)",
+                    resp.status_code, len(resp.content),
+                )
                 if resp.status_code != 200:
-                    logger.warning("Haiku filler returned %d", resp.status_code)
+                    logger.warning(
+                        "Haiku filler: bad status %d — body: %s",
+                        resp.status_code, resp.text[:200],
+                    )
                     return None
 
                 data = resp.json()
                 choices = data.get("choices", [])
                 if not choices:
+                    logger.warning("Haiku filler: no choices in response: %s", data)
                     return None
 
                 text = choices[0].get("message", {}).get("content", "").strip()
+                if text:
+                    logger.info("Haiku filler: generated phrase: %s", text)
+                else:
+                    logger.warning("Haiku filler: empty content in response")
                 return text or None
 
     except (asyncio.TimeoutError, TimeoutError):
-        logger.warning("Haiku filler timed out after %.1fs", HARD_TIMEOUT_S)
+        logger.warning("Haiku filler: timed out after %.1fs waiting for gateway", HARD_TIMEOUT_S)
         return None
     except Exception:
-        logger.warning("Haiku filler failed", exc_info=True)
+        logger.warning("Haiku filler: unexpected error", exc_info=True)
         return None
