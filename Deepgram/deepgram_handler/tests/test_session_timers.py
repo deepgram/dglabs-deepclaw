@@ -1,4 +1,4 @@
-"""Tests for SessionTimers — response timeout chain."""
+"""Tests for SessionTimers — response timeout and idle caller detection."""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -91,3 +91,93 @@ async def test_user_re_speaks_restarts_response_timers():
     cb.inject_message.assert_not_called()
 
     timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_idle_prompt_fires_after_agent_audio_done():
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(idle_prompt_ms=100, idle_exit_ms=100), cb)
+
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.15)  # > 100ms idle prompt
+
+    cb.inject_message.assert_called_once_with("Still there?")
+    cb.end_call.assert_not_called()
+
+    timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_idle_exit_fires_after_prompt():
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(idle_prompt_ms=100, idle_exit_ms=100), cb)
+
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.55)  # > 100ms prompt + 100ms exit + post-exit delay
+
+    assert cb.inject_message.call_count >= 2
+    cb.end_call.assert_called_once()
+
+    timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_user_speech_resets_idle_timers():
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(idle_prompt_ms=100, idle_exit_ms=100), cb)
+
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.05)  # < 100ms
+    timers.on_user_spoke()     # Resets idle + starts response
+    await asyncio.sleep(0.5)
+
+    # Idle prompt should NOT have fired (was reset)
+    # Response reengage might have fired instead
+    for call in cb.inject_message.call_args_list:
+        assert call[0][0] != "Still there?"
+
+    timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_idle_prompted_guard_prevents_reentrance():
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(idle_prompt_ms=100, idle_exit_ms=500), cb)
+
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.15)  # Prompt fires
+
+    # Simulate the prompt's own agentAudioDone
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.15)
+
+    # Should only have one inject (the prompt), not a second prompt
+    cb.inject_message.assert_called_once_with("Still there?")
+
+    timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_disabled_timers_do_nothing():
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(enabled=False), cb)
+
+    timers.on_user_spoke()
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.5)
+
+    cb.inject_message.assert_not_called()
+    cb.end_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_clear_all_prevents_pending_callbacks():
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(), cb)
+
+    timers.on_user_spoke()
+    timers.clear_all()
+    await asyncio.sleep(0.5)
+
+    cb.inject_message.assert_not_called()
+    cb.end_call.assert_not_called()
