@@ -594,7 +594,8 @@ async function deliverTwilioSmsReply(params: {
         await sendTwilioSms({ account, to, text: chunk });
         statusSink?.({ lastOutboundAt: Date.now() });
       } catch (err) {
-        runtime.error?.(`Twilio SMS message send failed: ${String(err)}`);
+        const cause = err instanceof Error && err.cause ? ` cause=${String(err.cause)}` : "";
+        runtime.error?.(`Twilio SMS message send failed: ${String(err)}${cause}`);
       }
     }
   }
