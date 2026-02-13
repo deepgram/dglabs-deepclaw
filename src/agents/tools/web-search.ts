@@ -31,7 +31,9 @@ const OPENROUTER_KEY_PREFIXES = ["sk-or-"];
 const XAI_API_ENDPOINT = "https://api.x.ai/v1/responses";
 const DEFAULT_GROK_MODEL = "grok-4-1-fast";
 
-const ANTHROPIC_MESSAGES_ENDPOINT = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_MESSAGES_ENDPOINT =
+  (process.env.ANTHROPIC_BASE_URL?.replace(/\/+$/, "") ?? "https://api.anthropic.com") +
+  "/v1/messages";
 const DEFAULT_ANTHROPIC_SEARCH_MODEL = "claude-sonnet-4-5-20250929";
 
 const SEARCH_CACHE = new Map<string, CacheEntry<Record<string, unknown>>>();
