@@ -238,7 +238,7 @@ async def _notify_child_sessions(
                 "includeGlobal": False,
                 "includeUnknown": False,
             },
-            gateway_url="http://localhost:18789",
+            gateway_url="ws://localhost:18789",
             gateway_token=settings.OPENCLAW_GATEWAY_TOKEN,
             timeout=5.0,
         )
@@ -274,7 +274,7 @@ async def _notify_child_sessions(
                     "message": message,
                     "sessionKey": child_key,
                 },
-                gateway_url="http://localhost:18789",
+                gateway_url="ws://localhost:18789",
                 gateway_token=settings.OPENCLAW_GATEWAY_TOKEN,
                 timeout=10.0,
             )
