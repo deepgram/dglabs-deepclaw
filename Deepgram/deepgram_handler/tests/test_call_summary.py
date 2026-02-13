@@ -67,7 +67,7 @@ async def test_generate_call_summary_appends_entry(tmp_path, monkeypatch):
 
     class FakeSettings:
         OPENCLAW_AGENT_ID = "main"
-        ANTHROPIC_API_KEY = "test-key"
+        OPENCLAW_GATEWAY_TOKEN = "gw-token"
         TIMEZONE = "UTC"
         CALLS_MAX_ENTRIES = 50
 
@@ -104,7 +104,7 @@ async def test_generate_call_summary_creates_file_if_missing(tmp_path, monkeypat
 
     class FakeSettings:
         OPENCLAW_AGENT_ID = "main"
-        ANTHROPIC_API_KEY = "test-key"
+        OPENCLAW_GATEWAY_TOKEN = "gw-token"
         TIMEZONE = "UTC"
         CALLS_MAX_ENTRIES = 50
 
@@ -135,7 +135,7 @@ async def test_generate_call_summary_skips_on_llm_failure(tmp_path, monkeypatch)
 
     class FakeSettings:
         OPENCLAW_AGENT_ID = "main"
-        ANTHROPIC_API_KEY = "test-key"
+        OPENCLAW_GATEWAY_TOKEN = "gw-token"
         TIMEZONE = "UTC"
         CALLS_MAX_ENTRIES = 50
 
@@ -173,7 +173,7 @@ async def test_generate_call_summary_trims_to_max(tmp_path, monkeypatch):
 
     class FakeSettings:
         OPENCLAW_AGENT_ID = "main"
-        ANTHROPIC_API_KEY = "test-key"
+        OPENCLAW_GATEWAY_TOKEN = "gw-token"
         TIMEZONE = "UTC"
         CALLS_MAX_ENTRIES = 2  # Only keep 2
 

@@ -216,7 +216,7 @@ async def extract_agent_identity(settings, call_info: CallInfo) -> None:
 
         prompt = IDENTITY_PROMPT_TEMPLATE.format(transcript=transcript_text)
         raw = await call_anthropic(
-            settings.ANTHROPIC_API_KEY,
+            settings.OPENCLAW_GATEWAY_TOKEN,
             prompt,
             IDENTITY_SYSTEM_PROMPT,
         )
