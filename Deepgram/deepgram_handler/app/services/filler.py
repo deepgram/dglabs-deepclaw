@@ -23,7 +23,7 @@ MAX_TOKENS = 50
 def _build_prompt(user_message: str) -> str:
     return (
         f'You\'re a voice assistant on a phone call. The user just said: "{user_message}". '
-        "You need a moment to think. Generate a single short \"thinking\" phrase (under 10 words) "
+        'You need a moment to think. Generate a single short "thinking" phrase (under 10 words) '
         "that shows you're considering their specific question -- not a generic acknowledgment.\n"
         'BAD: "Got it." "Sure thing." "Absolutely." (these sound like the real answer starting)\n'
         'GOOD: "Hmm, good question." "Let me think about that." "Oh interesting, one sec."\n'
@@ -52,7 +52,9 @@ async def generate_filler_phrase(user_message: str, api_key: str) -> str | None:
                     json={
                         "model": HAIKU_MODEL,
                         "max_tokens": MAX_TOKENS,
-                        "messages": [{"role": "user", "content": _build_prompt(user_message)}],
+                        "messages": [
+                            {"role": "user", "content": _build_prompt(user_message)}
+                        ],
                     },
                     timeout=HARD_TIMEOUT_S,
                 )

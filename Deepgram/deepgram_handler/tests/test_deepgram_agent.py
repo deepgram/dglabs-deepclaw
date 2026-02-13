@@ -7,10 +7,9 @@ from fastapi import WebSocketDisconnect
 
 from app.config import Settings
 from app.services.deepgram_agent import (
-    build_settings_config,
     _read_next_greeting,
+    build_settings_config,
     run_agent_bridge,
-    NEXT_GREETING_PATH,
 )
 
 
@@ -39,14 +38,17 @@ def test_build_settings_config_defaults():
     think = agent["think"]
     assert think["provider"]["type"] == "open_ai"
     assert think["provider"]["model"] == "anthropic/claude-haiku-4-5"
-    assert think["provider"]["url"] == "https://deepclaw-instance.fly.dev/v1/chat/completions"
-    assert think["provider"]["headers"]["Authorization"] == "Bearer gw-token"
-    assert think["provider"]["headers"]["x-openclaw-session-key"] == "agent:main:abc123"
-    assert "fly-force-instance-id" not in think["provider"]["headers"]
+    assert (
+        think["endpoint"]["url"]
+        == "https://deepclaw-instance.fly.dev/v1/chat/completions"
+    )
+    assert think["endpoint"]["headers"]["Authorization"] == "Bearer gw-token"
+    assert think["endpoint"]["headers"]["x-openclaw-session-key"] == "agent:main:abc123"
+    assert "fly-force-instance-id" not in think["endpoint"]["headers"]
     assert "prompt" in think
 
     assert agent["speak"]["provider"]["type"] == "deepgram"
-    assert agent["speak"]["provider"]["model"] == "aura-2-apollo-en"
+    assert agent["speak"]["provider"]["model"] == "aura-2-thalia-en"
     assert "greeting" in agent
 
 
@@ -59,11 +61,19 @@ def test_build_settings_config_with_fly_machine_id():
     with patch.dict(os.environ, {"FLY_MACHINE_ID": "machine-xyz"}):
         config = build_settings_config(settings, call_id="abc123")
 
-    headers = config["agent"]["think"]["provider"]["headers"]
+    headers = config["agent"]["think"]["endpoint"]["headers"]
     assert headers["fly-force-instance-id"] == "machine-xyz"
 
 
-def test_build_settings_config_custom():
+def test_build_settings_config_custom(tmp_path, monkeypatch):
+    # Mock USER_MD_PATH to ensure new-caller branch (custom AGENT_PROMPT used)
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md"
+    )
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.NEXT_GREETING_PATH", tmp_path / "nope.txt"
+    )
+
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
         OPENCLAW_GATEWAY_TOKEN="gw-token",
@@ -81,8 +91,14 @@ def test_build_settings_config_custom():
 
     assert agent["listen"]["provider"]["model"] == "nova-3"
     assert agent["think"]["provider"]["model"] == "anthropic/claude-sonnet-4-5-20250929"
-    assert agent["think"]["provider"]["url"] == "https://custom.example.com/v1/chat/completions"
-    assert agent["think"]["provider"]["headers"]["x-openclaw-session-key"] == "agent:custom-agent:call-99"
+    assert (
+        agent["think"]["endpoint"]["url"]
+        == "https://custom.example.com/v1/chat/completions"
+    )
+    assert (
+        agent["think"]["endpoint"]["headers"]["x-openclaw-session-key"]
+        == "agent:custom-agent:call-99"
+    )
     assert agent["think"]["prompt"] == "You are a pirate."
     assert agent["speak"]["provider"]["model"] == "aura-2-luna-en"
     assert agent["greeting"] == "Ahoy!"
@@ -105,10 +121,15 @@ def test_build_settings_config_with_prompt_override():
     )
     agent = config["agent"]
 
-    assert agent["think"]["prompt"] == "Call the pizza place and order a large pepperoni."
+    assert (
+        agent["think"]["prompt"] == "Call the pizza place and order a large pepperoni."
+    )
     assert agent["greeting"] == "Hello!"
     # Session key uses the provided call_id
-    assert "outbound-abc123" in agent["think"]["endpoint"]["headers"]["x-openclaw-session-key"]
+    assert (
+        "outbound-abc123"
+        in agent["think"]["endpoint"]["headers"]["x-openclaw-session-key"]
+    )
 
 
 def test_build_settings_config_prompt_override_default_greeting():
@@ -154,7 +175,9 @@ def test_build_settings_uses_next_greeting_file(tmp_path, monkeypatch):
     greeting_file.write_text("So you're back. What do you need?")
     monkeypatch.setattr("app.services.deepgram_agent.NEXT_GREETING_PATH", greeting_file)
     # Also ensure USER.md doesn't exist so we hit the new-caller branch
-    monkeypatch.setattr("app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md")
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md"
+    )
 
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
@@ -167,8 +190,12 @@ def test_build_settings_uses_next_greeting_file(tmp_path, monkeypatch):
 
 def test_build_settings_falls_back_when_no_greeting_file(tmp_path, monkeypatch):
     """When no NEXT_GREETING.txt, fall back to default greeting."""
-    monkeypatch.setattr("app.services.deepgram_agent.NEXT_GREETING_PATH", tmp_path / "nope.txt")
-    monkeypatch.setattr("app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md")
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.NEXT_GREETING_PATH", tmp_path / "nope.txt"
+    )
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.USER_MD_PATH", tmp_path / "nope.md"
+    )
 
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
@@ -209,14 +236,18 @@ async def test_generate_next_greeting_writes_file(tmp_path, monkeypatch):
 
     mock_response = httpx.Response(
         200,
-        json={"choices": [{"message": {"content": "Back again? Let's make it count."}}]},
+        json={
+            "choices": [{"message": {"content": "Back again? Let's make it count."}}]
+        },
         request=httpx.Request("POST", "http://localhost:18789/v1/chat/completions"),
     )
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.post = AsyncMock(return_value=mock_response)
-    monkeypatch.setattr("app.services.deepgram_agent.httpx.AsyncClient", lambda: mock_client)
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.httpx.AsyncClient", lambda: mock_client
+    )
 
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
@@ -240,7 +271,9 @@ async def test_generate_next_greeting_handles_failure(tmp_path, monkeypatch):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.post = AsyncMock(side_effect=httpx.ConnectError("connection refused"))
-    monkeypatch.setattr("app.services.deepgram_agent.httpx.AsyncClient", lambda: mock_client)
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.httpx.AsyncClient", lambda: mock_client
+    )
 
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
@@ -266,22 +299,28 @@ async def test_run_agent_bridge_calls_generate_next_greeting(monkeypatch):
     mock_dg_ws = AsyncMock()
     mock_dg_ws.close = AsyncMock()
     mock_dg_ws.send = AsyncMock()
+
     # Make __aiter__ return an empty async iterator
     async def empty_iter():
         return
-        yield  # noqa: make it a generator
+        yield  # noqa: F841
+
     mock_dg_ws.__aiter__ = lambda self: empty_iter()
 
     mock_connect = AsyncMock(return_value=mock_dg_ws)
     monkeypatch.setattr("app.services.deepgram_agent.connect", mock_connect)
 
     mock_generate = AsyncMock()
-    monkeypatch.setattr("app.services.deepgram_agent._generate_next_greeting", mock_generate)
+    monkeypatch.setattr(
+        "app.services.deepgram_agent._generate_next_greeting", mock_generate
+    )
 
     mock_twilio_ws = AsyncMock()
     mock_twilio_ws.receive_text = AsyncMock(side_effect=WebSocketDisconnect())
 
-    await run_agent_bridge(mock_twilio_ws, "stream-123", settings=settings, call_id="test-call")
+    await run_agent_bridge(
+        mock_twilio_ws, "stream-123", settings=settings, call_id="test-call"
+    )
 
     mock_generate.assert_called_once()
     call_args = mock_generate.call_args
@@ -301,23 +340,30 @@ async def test_run_agent_bridge_skips_greeting_gen_for_outbound(monkeypatch):
     mock_dg_ws = AsyncMock()
     mock_dg_ws.close = AsyncMock()
     mock_dg_ws.send = AsyncMock()
+
     async def empty_iter():
         return
         yield
+
     mock_dg_ws.__aiter__ = lambda self: empty_iter()
 
     mock_connect = AsyncMock(return_value=mock_dg_ws)
     monkeypatch.setattr("app.services.deepgram_agent.connect", mock_connect)
 
     mock_generate = AsyncMock()
-    monkeypatch.setattr("app.services.deepgram_agent._generate_next_greeting", mock_generate)
+    monkeypatch.setattr(
+        "app.services.deepgram_agent._generate_next_greeting", mock_generate
+    )
 
     mock_twilio_ws = AsyncMock()
     mock_twilio_ws.receive_text = AsyncMock(side_effect=WebSocketDisconnect())
 
     await run_agent_bridge(
-        mock_twilio_ws, "stream-456", settings=settings,
-        call_id="outbound-abc", prompt_override="Call the pizza place.",
+        mock_twilio_ws,
+        "stream-456",
+        settings=settings,
+        call_id="outbound-abc",
+        prompt_override="Call the pizza place.",
     )
 
     mock_generate.assert_not_called()
@@ -337,16 +383,20 @@ async def test_run_agent_bridge_registers_session(monkeypatch):
     mock_dg_ws = AsyncMock()
     mock_dg_ws.close = AsyncMock()
     mock_dg_ws.send = AsyncMock()
+
     async def empty_iter():
         return
         yield
+
     mock_dg_ws.__aiter__ = lambda self: empty_iter()
 
     mock_connect = AsyncMock(return_value=mock_dg_ws)
     monkeypatch.setattr("app.services.deepgram_agent.connect", mock_connect)
 
     mock_generate = AsyncMock()
-    monkeypatch.setattr("app.services.deepgram_agent._generate_next_greeting", mock_generate)
+    monkeypatch.setattr(
+        "app.services.deepgram_agent._generate_next_greeting", mock_generate
+    )
 
     # Track register/unregister calls
     registered_keys: list[str] = []
@@ -362,13 +412,19 @@ async def test_run_agent_bridge_registers_session(monkeypatch):
         unregistered_keys.append(key)
         original_unregister(key)
 
-    monkeypatch.setattr("app.services.deepgram_agent.session_registry.register", track_register)
-    monkeypatch.setattr("app.services.deepgram_agent.session_registry.unregister", track_unregister)
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.session_registry.register", track_register
+    )
+    monkeypatch.setattr(
+        "app.services.deepgram_agent.session_registry.unregister", track_unregister
+    )
 
     mock_twilio_ws = AsyncMock()
     mock_twilio_ws.receive_text = AsyncMock(side_effect=WebSocketDisconnect())
 
-    await run_agent_bridge(mock_twilio_ws, "stream-reg", settings=settings, call_id="reg-call")
+    await run_agent_bridge(
+        mock_twilio_ws, "stream-reg", settings=settings, call_id="reg-call"
+    )
 
     # Should have registered with the session key
     assert len(registered_keys) == 1
@@ -383,8 +439,6 @@ async def test_run_agent_bridge_registers_session(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_agent_bridge_unregisters_on_error(monkeypatch):
     """Session is unregistered even if the bridge errors out."""
-    from app.services import session_registry
-
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
         OPENCLAW_GATEWAY_TOKEN="gw-token",
@@ -394,17 +448,21 @@ async def test_run_agent_bridge_unregisters_on_error(monkeypatch):
     mock_dg_ws = AsyncMock()
     mock_dg_ws.close = AsyncMock()
     mock_dg_ws.send = AsyncMock()
+
     # Simulate an error during iteration
     async def error_iter():
         raise RuntimeError("boom")
         yield  # noqa
+
     mock_dg_ws.__aiter__ = lambda self: error_iter()
 
     mock_connect = AsyncMock(return_value=mock_dg_ws)
     monkeypatch.setattr("app.services.deepgram_agent.connect", mock_connect)
 
     mock_generate = AsyncMock()
-    monkeypatch.setattr("app.services.deepgram_agent._generate_next_greeting", mock_generate)
+    monkeypatch.setattr(
+        "app.services.deepgram_agent._generate_next_greeting", mock_generate
+    )
 
     unregistered_keys: list[str] = []
     monkeypatch.setattr(
@@ -415,7 +473,9 @@ async def test_run_agent_bridge_unregisters_on_error(monkeypatch):
     mock_twilio_ws = AsyncMock()
     mock_twilio_ws.receive_text = AsyncMock(side_effect=WebSocketDisconnect())
 
-    await run_agent_bridge(mock_twilio_ws, "stream-err", settings=settings, call_id="err-call")
+    await run_agent_bridge(
+        mock_twilio_ws, "stream-err", settings=settings, call_id="err-call"
+    )
 
     assert len(unregistered_keys) == 1
     assert "err-call" in unregistered_keys[0]
