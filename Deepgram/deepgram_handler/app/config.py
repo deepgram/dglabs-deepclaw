@@ -68,11 +68,20 @@ class Settings(BaseSettings):
     IDLE_PROMPT_MESSAGE: str = "Are you still there?"
     IDLE_EXIT_MESSAGE: str = "Alright, I'll let you go. Call back anytime. Goodbye."
 
+    _DEFAULT_FILLER_PHRASES: list[str] = [
+        "Hmm, let me think about that.",
+        "Good question, one sec.",
+        "Oh interesting, give me a moment.",
+        "Let me look into that.",
+        "Hmm, let me see.",
+        "One moment while I think on that.",
+    ]
+
     @property
     def filler_phrases_list(self) -> list[str]:
-        if not self.FILLER_PHRASES:
-            return []
-        return [p.strip() for p in self.FILLER_PHRASES.split(",") if p.strip()]
+        if self.FILLER_PHRASES:
+            return [p.strip() for p in self.FILLER_PHRASES.split(",") if p.strip()]
+        return self._DEFAULT_FILLER_PHRASES
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
