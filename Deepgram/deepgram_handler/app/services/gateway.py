@@ -80,11 +80,23 @@ async def call_gateway(
                                 error.get("message", "unknown"),
                             )
                             return None
-                        logger.info("Gateway RPC %s — connected", method)
+                        hello = msg.get("payload", {})
+                        server = hello.get("server", {}) if isinstance(hello, dict) else {}
+                        logger.info(
+                            "Gateway RPC %s — connected (server=%s, connId=%s)",
+                            method,
+                            server.get("version", "?"),
+                            server.get("connId", "?"),
+                        )
                         break
 
                 # --- method request ---
                 req_id = str(uuid.uuid4())
+                logger.info(
+                    "Gateway RPC %s — sending request (params=%s)",
+                    method,
+                    json.dumps(params, default=str)[:200],
+                )
                 await ws.send(
                     json.dumps(
                         {
@@ -112,8 +124,10 @@ async def call_gateway(
                                 error.get("message", "unknown"),
                             )
                             return None
-                        logger.info("Gateway RPC %s — success", method)
-                        return msg.get("payload")
+                        payload = msg.get("payload")
+                        payload_preview = json.dumps(payload, default=str)[:200] if payload else "null"
+                        logger.info("Gateway RPC %s — success (payload=%s)", method, payload_preview)
+                        return payload
 
     except Exception:
         logger.warning("Gateway RPC %s failed", method, exc_info=True)
