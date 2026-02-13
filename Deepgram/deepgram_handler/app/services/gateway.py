@@ -32,9 +32,16 @@ async def call_gateway(
                 headers={"Authorization": f"Bearer {gateway_token}"},
                 json={"method": method, "params": params},
             )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Gateway RPC %s returned %d: %s",
+                    method,
+                    resp.status_code,
+                    resp.text[:200],
+                )
             resp.raise_for_status()
             data = resp.json()
             return data.get("result")
     except Exception:
-        logger.debug("Gateway RPC %s failed", method, exc_info=True)
+        logger.warning("Gateway RPC %s failed", method, exc_info=True)
         return None
