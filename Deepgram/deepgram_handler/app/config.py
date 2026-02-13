@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     FILLER_PHRASES: str = ""
     FILLER_DYNAMIC: bool = True
     ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
 
     # Post-call extraction
     TIMEZONE: str = "UTC"
