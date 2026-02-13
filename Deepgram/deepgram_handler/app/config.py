@@ -30,6 +30,7 @@ class Settings(BaseSettings):
         "Keep responses brief and conversational (1-2 sentences max). "
         'Do NOT start your response with filler phrases like "Let me check" or "One moment" — '
         "jump straight into the answer."
+        "If you are asked to send a text, use the twilio text skill"
     )
     AGENT_GREETING: str = "Hello! How can I help you today?"
 

@@ -37,12 +37,16 @@ VOICE_FORMAT_RULES = (
     "Keep responses brief and conversational (1-2 sentences max). "
     'Do NOT start your response with filler phrases like "Let me check" or "One moment" — '
     "that is handled automatically. Jump straight into the answer."
+    "If you are asked to text or call, use the twilio action"
+
 )
 
 KNOWN_USER_PROMPT = (
     f"You are on a phone call. {VOICE_FORMAT_RULES} "
     "If a request is ambiguous or you're unsure what the caller means, ask a quick clarifying question "
     "before acting. Don't guess or add requirements they didn't ask for."
+    "If you are asked to text or call, use the twilio action"
+
 )
 
 

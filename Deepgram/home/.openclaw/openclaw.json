@@ -39,10 +39,12 @@
         "target": "last"
       },
       "model": {
-        "primary": "litellm/claude-haiku-4-5"
+        "primary": "litellm/claude-sonnet-4-5-20250929"
       },
       "models": {
-        "litellm/claude-haiku-4-5": { "alias": "Haiku" }
+        "litellm/claude-opus-4-5": { "alias": "Opus" },
+        "litellm/claude-sonnet-4-5-20250929": { "alias": "Sonnet" },
+        "litellm/claude-haiku-4-5-20251001": { "alias": "Haiku" }
       }
     }
   },

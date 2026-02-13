@@ -1,23 +1,35 @@
 """SMS router: route inbound Twilio SMS through OpenClaw."""
 
+import asyncio
 import logging
 from datetime import date
 from xml.sax.saxutils import escape
 
-import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from app.config import get_settings
 from app.services.mms_media import build_message_content
-from app.services.sms_context import build_sms_messages
+from app.services.sms_context import (
+    FALLBACK_MESSAGE,
+    HOLDING_MESSAGE,
+    TWILIO_REPLY_TIMEOUT,
+    ask_openclaw,
+    send_delayed_reply,
+    truncate_reply,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["sms"])
 
-OPENCLAW_URL = "http://localhost:18789/v1/chat/completions"
-FALLBACK_MESSAGE = "Hey! I'm just getting set up — text me again in a minute and I'll be ready to chat."
+
+def _twiml(text: str) -> Response:
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f"<Response><Message>{escape(text)}</Message></Response>"
+    )
+    return Response(content=body, media_type="application/xml")
 
 
 @router.post("/twilio/inbound-sms")
@@ -36,33 +48,17 @@ async def twilio_inbound_sms(request: Request):
 
     content = await build_message_content(form)
 
-    reply = FALLBACK_MESSAGE
+    task = asyncio.create_task(ask_openclaw(settings, session_key, content))
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                OPENCLAW_URL,
-                headers={
-                    "Authorization": f"Bearer {settings.OPENCLAW_GATEWAY_TOKEN}",
-                    "x-openclaw-session-key": session_key,
-                },
-                json={
-                    "model": settings.AGENT_THINK_MODEL,
-                    "messages": build_sms_messages(content),
-                    "stream": False,
-                },
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            reply = data["choices"][0]["message"]["content"]
+        reply = await asyncio.wait_for(asyncio.shield(task), timeout=TWILIO_REPLY_TIMEOUT)
+        reply = truncate_reply(reply)
+        logger.info("SMS reply to %s: %s", from_number, reply[:200])
+        return _twiml(reply)
+    except asyncio.TimeoutError:
+        logger.warning("OpenClaw timed out for %s, sending holding message", from_number)
+        asyncio.create_task(send_delayed_reply(task, from_number))
+        return _twiml(HOLDING_MESSAGE)
     except Exception:
         logger.exception("Failed to get response from OpenClaw")
-
-    logger.info("SMS reply to %s: %s", from_number, reply[:200])
-
-    twiml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        f"<Response><Message>{escape(reply)}</Message></Response>"
-    )
-    logger.debug("TwiML response: %s", twiml)
-    return Response(content=twiml, media_type="application/xml")
+        return _twiml(FALLBACK_MESSAGE)
