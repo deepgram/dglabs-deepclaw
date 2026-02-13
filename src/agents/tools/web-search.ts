@@ -348,6 +348,11 @@ async function runAnthropicSearch(params: {
   apiKey: string;
   timeoutSeconds: number;
 }): Promise<{ content: string; citations: string[] }> {
+  console.log(
+    `[web-search:anthropic] query="${params.query}" model=${DEFAULT_ANTHROPIC_SEARCH_MODEL} timeout=${params.timeoutSeconds}s`,
+  );
+  const start = Date.now();
+
   const res = await fetch(ANTHROPIC_MESSAGES_ENDPOINT, {
     method: "POST",
     headers: {
@@ -366,6 +371,10 @@ async function runAnthropicSearch(params: {
 
   if (!res.ok) {
     const detail = await readResponseText(res);
+    const elapsed = Date.now() - start;
+    console.error(
+      `[web-search:anthropic] FAILED status=${res.status} elapsed=${elapsed}ms detail=${detail || res.statusText}`,
+    );
     throw new Error(`Anthropic API error (${res.status}): ${detail || res.statusText}`);
   }
 
@@ -374,8 +383,10 @@ async function runAnthropicSearch(params: {
 
   const textParts: string[] = [];
   const citations: string[] = [];
+  const blockTypes: string[] = [];
 
   for (const block of blocks) {
+    blockTypes.push(block.type);
     if (block.type === "text" && "text" in block) {
       textParts.push(block.text);
       if ("citations" in block) {
@@ -396,6 +407,11 @@ async function runAnthropicSearch(params: {
   }
 
   const content = textParts.join("\n\n") || "No response";
+  const elapsed = Date.now() - start;
+  console.log(
+    `[web-search:anthropic] OK elapsed=${elapsed}ms blocks=[${blockTypes.join(",")}] textLen=${content.length} citations=${citations.length}`,
+  );
+
   return { content, citations };
 }
 
@@ -723,6 +739,7 @@ export function createWebSearchTool(options?: {
       if (!apiKey) {
         const anthropicKey = resolveAnthropicApiKey();
         if (anthropicKey) {
+          console.log(`[web-search] No ${provider} API key — falling back to Anthropic web search`);
           const params = args as Record<string, unknown>;
           const query = readStringParam(params, "query", { required: true });
           const timeoutSeconds = resolveTimeoutSeconds(
@@ -733,25 +750,38 @@ export function createWebSearchTool(options?: {
           const cacheKey = normalizeCacheKey(`anthropic:${query}`);
           const cached = readCache(SEARCH_CACHE, cacheKey);
           if (cached) {
+            console.log(`[web-search:anthropic] Cache hit for query="${query}"`);
             return jsonResult({ ...cached.value, cached: true });
           }
           const start = Date.now();
-          const { content, citations } = await runAnthropicSearch({
-            query,
-            apiKey: anthropicKey,
-            timeoutSeconds,
-          });
-          const payload = {
-            query,
-            provider: "anthropic" as const,
-            model: DEFAULT_ANTHROPIC_SEARCH_MODEL,
-            tookMs: Date.now() - start,
-            content: wrapWebContent(content),
-            citations,
-          };
-          writeCache(SEARCH_CACHE, cacheKey, payload, cacheTtlMs);
-          return jsonResult(payload);
+          try {
+            const { content, citations } = await runAnthropicSearch({
+              query,
+              apiKey: anthropicKey,
+              timeoutSeconds,
+            });
+            const payload = {
+              query,
+              provider: "anthropic" as const,
+              model: DEFAULT_ANTHROPIC_SEARCH_MODEL,
+              tookMs: Date.now() - start,
+              content: wrapWebContent(content),
+              citations,
+            };
+            writeCache(SEARCH_CACHE, cacheKey, payload, cacheTtlMs);
+            return jsonResult(payload);
+          } catch (err) {
+            const elapsed = Date.now() - start;
+            console.error(
+              `[web-search:anthropic] Search failed after ${elapsed}ms:`,
+              err instanceof Error ? err.message : err,
+            );
+            throw err;
+          }
         }
+        console.warn(
+          `[web-search] No API key for ${provider} and no ANTHROPIC_API_KEY fallback available`,
+        );
         return jsonResult(missingSearchKeyPayload(provider));
       }
       const params = args as Record<string, unknown>;
