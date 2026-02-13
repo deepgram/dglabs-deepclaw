@@ -8,6 +8,7 @@ import {
   filterBootstrapFilesForSession,
   loadWorkspaceBootstrapFiles,
   resolveDefaultAgentWorkspaceDir,
+  type WorkspaceBootstrapFile,
 } from "./workspace.js";
 
 describe("resolveDefaultAgentWorkspaceDir", () => {
@@ -108,10 +109,10 @@ describe("BOOTSTRAP_FILE_REGISTRY", () => {
 
 describe("filterBootstrapFilesForSession", () => {
   it("returns all files for non-subagent sessions", () => {
-    const files = [
+    const files: WorkspaceBootstrapFile[] = [
       { name: "AGENTS.md", path: "/w/AGENTS.md", missing: false },
       { name: "SOUL.md", path: "/w/SOUL.md", missing: false },
-    ] as any[];
+    ];
     expect(filterBootstrapFilesForSession(files, "main:abc")).toEqual(files);
   });
 });
