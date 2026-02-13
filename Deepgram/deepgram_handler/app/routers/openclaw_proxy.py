@@ -135,12 +135,14 @@ async def proxy_chat_completions(request: Request):
 
         # Kick off dynamic generation in parallel
         dynamic_started = False
-        if settings.FILLER_DYNAMIC and settings.OPENCLAW_GATEWAY_TOKEN and user_message:
+        if settings.FILLER_DYNAMIC and settings.ANTHROPIC_API_KEY and user_message:
             dynamic_started = True
 
             async def _gen():
                 phrase = await generate_filler_phrase(
-                    user_message, settings.OPENCLAW_GATEWAY_TOKEN
+                    user_message,
+                    settings.ANTHROPIC_API_KEY,
+                    base_url=settings.ANTHROPIC_BASE_URL,
                 )
                 dynamic_phrase_holder[0] = phrase
                 logger.info("Dynamic filler ready: %s", phrase)
