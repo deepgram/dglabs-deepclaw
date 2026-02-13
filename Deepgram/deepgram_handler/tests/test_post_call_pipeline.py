@@ -31,7 +31,9 @@ async def test_conversation_text_captured_in_transcript():
     stop_event.is_set = MagicMock(return_value=False)
 
     messages = [
-        json.dumps({"type": "ConversationText", "role": "assistant", "content": "Hello!"}),
+        json.dumps(
+            {"type": "ConversationText", "role": "assistant", "content": "Hello!"}
+        ),
         json.dumps({"type": "ConversationText", "role": "user", "content": "Hi there"}),
     ]
 

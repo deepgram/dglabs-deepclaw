@@ -12,6 +12,7 @@ from app.services.workspace import CallInfo, TranscriptEntry
 
 # -- trim_call_entries --
 
+
 def test_trim_call_entries_under_max():
     content = (
         "# Call History\n\n"
@@ -23,11 +24,7 @@ def test_trim_call_entries_under_max():
 
 
 def test_trim_call_entries_at_max():
-    content = (
-        "# Call History\n\n"
-        "### Entry 1\nSummary 1.\n\n"
-        "### Entry 2\nSummary 2.\n"
-    )
+    content = "# Call History\n\n### Entry 1\nSummary 1.\n\n### Entry 2\nSummary 2.\n"
     result = trim_call_entries(content, max_entries=2)
     assert "Entry 1" in result
     assert "Entry 2" in result
@@ -48,11 +45,7 @@ def test_trim_call_entries_over_max():
 
 
 def test_trim_call_entries_preserves_header():
-    content = (
-        "# Call History\n\n"
-        "### Entry 1\nOld.\n\n"
-        "### Entry 2\nNew.\n"
-    )
+    content = "# Call History\n\n### Entry 1\nOld.\n\n### Entry 2\nNew.\n"
     result = trim_call_entries(content, max_entries=1)
     assert result.startswith("# Call History")
     assert "Entry 1" not in result
@@ -61,13 +54,16 @@ def test_trim_call_entries_preserves_header():
 
 # -- generate_call_summary --
 
+
 @pytest.mark.asyncio
 async def test_generate_call_summary_appends_entry(tmp_path, monkeypatch):
     monkeypatch.setattr("app.services.workspace.WORKSPACE_DIR", tmp_path)
 
     # Pre-existing CALLS.md
     calls_path = tmp_path / "CALLS.md"
-    calls_path.write_text("# Call History\n\n### 02/12/2026, 1:00 PM -- +15550000000 (inbound)\nOld call.\n")
+    calls_path.write_text(
+        "# Call History\n\n### 02/12/2026, 1:00 PM -- +15550000000 (inbound)\nOld call.\n"
+    )
 
     class FakeSettings:
         OPENCLAW_AGENT_ID = "main"
@@ -86,7 +82,9 @@ async def test_generate_call_summary_appends_entry(tmp_path, monkeypatch):
         ],
     )
 
-    with patch("app.services.call_summary.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.call_summary.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         mock_llm.return_value = "Caller said hi. Brief greeting exchange."
         await generate_call_summary(FakeSettings(), call_info)
 
@@ -120,7 +118,9 @@ async def test_generate_call_summary_creates_file_if_missing(tmp_path, monkeypat
         ],
     )
 
-    with patch("app.services.call_summary.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.call_summary.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         mock_llm.return_value = "Quick hello."
         await generate_call_summary(FakeSettings(), call_info)
 
@@ -149,7 +149,9 @@ async def test_generate_call_summary_skips_on_llm_failure(tmp_path, monkeypatch)
         ],
     )
 
-    with patch("app.services.call_summary.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.call_summary.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         mock_llm.return_value = None
         await generate_call_summary(FakeSettings(), call_info)
 
@@ -185,7 +187,9 @@ async def test_generate_call_summary_trims_to_max(tmp_path, monkeypatch):
         ],
     )
 
-    with patch("app.services.call_summary.call_anthropic", new_callable=AsyncMock) as mock_llm:
+    with patch(
+        "app.services.call_summary.call_anthropic", new_callable=AsyncMock
+    ) as mock_llm:
         mock_llm.return_value = "New call summary."
         await generate_call_summary(FakeSettings(), call_info)
 

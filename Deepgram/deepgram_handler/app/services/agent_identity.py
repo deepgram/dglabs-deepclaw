@@ -97,7 +97,7 @@ def _strip_frontmatter(content: str) -> str:
     if content.startswith("---"):
         end = content.find("---", 3)
         if end != -1:
-            return content[end + 3:].lstrip("\n")
+            return content[end + 3 :].lstrip("\n")
     return content
 
 
@@ -113,7 +113,7 @@ def parse_identity_md(content: str) -> AgentIdentity:
         if colon_idx == -1:
             continue
         label = re.sub(r"[*_]", "", cleaned[:colon_idx]).strip().lower()
-        value = re.sub(r"^[*_]+|[*_]+$", "", cleaned[colon_idx + 1:]).strip()
+        value = re.sub(r"^[*_]+|[*_]+$", "", cleaned[colon_idx + 1 :]).strip()
 
         # Check next line for indented placeholder value
         if not value and i + 1 < len(lines):
@@ -209,7 +209,9 @@ async def extract_agent_identity(settings, call_info: CallInfo) -> None:
         )
 
         if identity_has_values(existing_identity):
-            logger.info("[post-call] Skipping agent identity extraction: identity already populated")
+            logger.info(
+                "[post-call] Skipping agent identity extraction: identity already populated"
+            )
             return
 
         prompt = IDENTITY_PROMPT_TEMPLATE.format(transcript=transcript_text)
@@ -236,9 +238,7 @@ async def extract_agent_identity(settings, call_info: CallInfo) -> None:
 
         # Discard generic names
         if extracted.name and extracted.name.lower() in GENERIC_NAMES:
-            logger.info(
-                "[post-call] Discarding generic agent name: %s", extracted.name
-            )
+            logger.info("[post-call] Discarding generic agent name: %s", extracted.name)
             extracted.name = None
 
         merged = merge_agent_identities(existing_identity, extracted)
