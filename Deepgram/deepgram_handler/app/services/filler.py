@@ -41,8 +41,10 @@ async def generate_filler_phrase(user_message: str, gateway_token: str) -> str |
     Returns the phrase string, or None on any failure.
     """
     if not gateway_token:
+        logger.warning("No gateway token for filler generation, skipping")
         return None
 
+    logger.info("Generating dynamic filler for: %s", repr(user_message[:60]))
     try:
         async with asyncio.timeout(HARD_TIMEOUT_S):
             async with httpx.AsyncClient() as client:
@@ -76,8 +78,8 @@ async def generate_filler_phrase(user_message: str, gateway_token: str) -> str |
                 return text or None
 
     except (asyncio.TimeoutError, TimeoutError):
-        logger.debug("Haiku filler timed out")
+        logger.warning("Haiku filler timed out after %.1fs", HARD_TIMEOUT_S)
         return None
     except Exception:
-        logger.debug("Haiku filler failed", exc_info=True)
+        logger.warning("Haiku filler failed", exc_info=True)
         return None

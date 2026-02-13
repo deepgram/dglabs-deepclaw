@@ -134,7 +134,9 @@ async def proxy_chat_completions(request: Request):
         )
 
         # Kick off dynamic generation in parallel
+        dynamic_started = False
         if settings.FILLER_DYNAMIC and settings.OPENCLAW_GATEWAY_TOKEN and user_message:
+            dynamic_started = True
 
             async def _gen():
                 phrase = await generate_filler_phrase(
@@ -149,20 +151,36 @@ async def proxy_chat_completions(request: Request):
         async def _inject_filler():
             await asyncio.sleep(threshold_ms / 1000)
             phrase = dynamic_phrase_holder[0]
+            if phrase:
+                logger.info("Dynamic filler available at threshold: %s", phrase)
+            elif dynamic_started:
+                # Grace period: wait up to 500ms more for the dynamic phrase
+                logger.info("Dynamic filler not ready at threshold, waiting up to 500ms...")
+                for _ in range(5):
+                    await asyncio.sleep(0.1)
+                    phrase = dynamic_phrase_holder[0]
+                    if phrase:
+                        logger.info("Dynamic filler arrived during grace period: %s", phrase)
+                        break
             if not phrase:
                 phrases = settings.filler_phrases_list
                 phrase = random.choice(phrases) if phrases else None
-                logger.info("Using static filler: %s", phrase)
+                if phrase:
+                    logger.info("Falling back to static filler: %s", phrase)
+                else:
+                    logger.warning(
+                        "No filler phrase available (dynamic=None, static list empty), skipping injection"
+                    )
             if not phrase:
-                logger.info("No filler phrase available, skipping injection")
                 return
             try:
-                logger.info("Injecting filler: %s", phrase)
+                logger.info("Injecting filler phrase: %s", phrase)
                 await dg_ws.send(
                     json.dumps({"type": "InjectAgentMessage", "message": phrase})
                 )
+                logger.info("Filler phrase injected successfully")
             except Exception:
-                logger.debug("Failed to inject filler", exc_info=True)
+                logger.warning("Failed to inject filler phrase", exc_info=True)
 
         filler_task = asyncio.create_task(_inject_filler())
 
