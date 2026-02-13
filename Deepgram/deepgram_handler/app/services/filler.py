@@ -1,8 +1,9 @@
 """Dynamic filler phrase generation via Claude Haiku.
 
 Generates short, context-aware phrases to fill dead air during voice calls
-while the LLM or tool calls are processing. Falls back gracefully to None
-on any failure (timeout, network error, missing API key).
+while the LLM or tool calls are processing. Routes through the local OpenClaw
+gateway (which handles LLM provider auth). Falls back gracefully to None on
+any failure (timeout, network error, missing token).
 """
 
 from __future__ import annotations
@@ -14,8 +15,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
-API_URL = "https://api.anthropic.com/v1/messages"
+HAIKU_MODEL = "litellm/claude-haiku-4-5-20251001"
+GATEWAY_URL = "http://localhost:18789/v1/chat/completions"
 HARD_TIMEOUT_S = 2.0
 MAX_TOKENS = 50
 
@@ -31,27 +32,30 @@ def _build_prompt(user_message: str) -> str:
     )
 
 
-async def generate_filler_phrase(user_message: str, api_key: str) -> str | None:
+async def generate_filler_phrase(user_message: str, gateway_token: str) -> str | None:
     """Generate a context-aware filler phrase via Claude Haiku.
+
+    Routes through the local OpenClaw gateway so we inherit its LLM
+    provider auth rather than needing a direct Anthropic API key.
 
     Returns the phrase string, or None on any failure.
     """
-    if not api_key:
+    if not gateway_token:
         return None
 
     try:
         async with asyncio.timeout(HARD_TIMEOUT_S):
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    API_URL,
+                    GATEWAY_URL,
                     headers={
                         "Content-Type": "application/json",
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
+                        "Authorization": f"Bearer {gateway_token}",
                     },
                     json={
                         "model": HAIKU_MODEL,
                         "max_tokens": MAX_TOKENS,
+                        "stream": False,
                         "messages": [
                             {"role": "user", "content": _build_prompt(user_message)}
                         ],
@@ -64,11 +68,11 @@ async def generate_filler_phrase(user_message: str, api_key: str) -> str | None:
                     return None
 
                 data = resp.json()
-                content = data.get("content", [])
-                if not content:
+                choices = data.get("choices", [])
+                if not choices:
                     return None
 
-                text = content[0].get("text", "").strip()
+                text = choices[0].get("message", {}).get("content", "").strip()
                 return text or None
 
     except (asyncio.TimeoutError, TimeoutError):
