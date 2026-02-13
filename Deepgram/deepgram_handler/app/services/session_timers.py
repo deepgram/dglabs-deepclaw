@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 # Delay between injecting exit/goodbye message and actually hanging up,
 # giving TTS time to finish speaking.
 POST_EXIT_DELAY_S = 3.0
-POST_FAREWELL_DELAY_S = 1.0
 
 
 @dataclass
@@ -68,7 +67,7 @@ class SessionTimers:
         reengage_ms = self._config.get("response_reengage_ms", 0)
         exit_ms = self._config.get("response_exit_ms", 0)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         if reengage_ms > 0:
             self._response_reengage_handle = loop.call_later(
@@ -110,7 +109,7 @@ class SessionTimers:
 
         prompt_ms = self._config.get("idle_prompt_ms", 0)
         if prompt_ms > 0:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             self._idle_prompt_handle = loop.call_later(
                 prompt_ms / 1000,
                 lambda: asyncio.ensure_future(self._fire_idle_prompt()),
@@ -136,8 +135,11 @@ class SessionTimers:
         self._clear_idle_timers()
         self._cb.log("[SessionTimers] Response exit timeout — injecting exit message")
         msg = self._config.get("response_exit_message", "")
-        if msg:
-            await self._cb.inject_message(msg)
+        try:
+            if msg:
+                await self._cb.inject_message(msg)
+        except Exception:
+            self._cb.log("[SessionTimers] Failed to inject exit message, proceeding with hangup")
         await asyncio.sleep(self._config.get("post_exit_delay_s", POST_EXIT_DELAY_S))
         await self._cb.end_call()
 
@@ -152,7 +154,7 @@ class SessionTimers:
 
         exit_ms = self._config.get("idle_exit_ms", 0)
         if exit_ms > 0:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             self._idle_exit_handle = loop.call_later(
                 exit_ms / 1000,
                 lambda: asyncio.ensure_future(self._fire_idle_exit()),
@@ -166,8 +168,11 @@ class SessionTimers:
         self._clear_response_timers()
         self._cb.log("[SessionTimers] Idle exit timeout — injecting exit message")
         msg = self._config.get("idle_exit_message", "")
-        if msg:
-            await self._cb.inject_message(msg)
+        try:
+            if msg:
+                await self._cb.inject_message(msg)
+        except Exception:
+            self._cb.log("[SessionTimers] Failed to inject idle exit message, proceeding with hangup")
         await asyncio.sleep(self._config.get("post_exit_delay_s", POST_EXIT_DELAY_S))
         await self._cb.end_call()
 
