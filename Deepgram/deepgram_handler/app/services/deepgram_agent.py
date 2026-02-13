@@ -230,6 +230,7 @@ async def _notify_child_sessions(
     from app.services.gateway import call_gateway
 
     try:
+        logger.info("Querying child sessions for %s", session_key)
         result = await call_gateway(
             method="sessions.list",
             params={
@@ -244,10 +245,12 @@ async def _notify_child_sessions(
         )
 
         if not result:
+            logger.info("No child sessions result (gateway returned None)")
             return
 
         sessions = result.get("sessions", [])
         if not sessions:
+            logger.info("No child sessions found for %s", session_key)
             return
 
         logger.info("Notifying %d child session(s) that call ended", len(sessions))
@@ -268,6 +271,7 @@ async def _notify_child_sessions(
                     "If you have results to deliver, send them via SMS using the twilio action."
                 )
 
+            logger.info("Notifying child session %s", child_key)
             await call_gateway(
                 method="agent",
                 params={
@@ -581,6 +585,13 @@ async def run_agent_bridge(
 
         # Create session timers
         if settings.SESSION_TIMER_ENABLED:
+            logger.info(
+                "Session timers enabled (reengage=%dms, exit=%dms, idle_prompt=%dms, idle_exit=%dms)",
+                settings.RESPONSE_REENGAGE_MS,
+                settings.RESPONSE_EXIT_MS,
+                settings.IDLE_PROMPT_MS,
+                settings.IDLE_EXIT_MS,
+            )
             timers = SessionTimers(
                 {
                     "enabled": True,
@@ -612,6 +623,7 @@ async def run_agent_bridge(
     finally:
         if timers:
             timers.clear_all()
+            logger.info("Session timers cleared on bridge teardown")
 
         if session_key:
             session_registry.unregister(session_key)
