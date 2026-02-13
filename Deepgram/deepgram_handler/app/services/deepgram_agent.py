@@ -158,6 +158,24 @@ def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
         )
         lines.append("- Goal: names exchanged, something useful done, give them a reason to call back.")
 
+    # Debug: summarize which sections were included
+    sections = ["voice_constraints"]
+    if profile_filled:
+        display_name = profile.call_name or profile.name or "unnamed"
+        sections.append(f"caller_context ({display_name})")
+        if calls_md:
+            recent = parse_calls_md(calls_md, count=3)
+            if recent:
+                sections.append(f"recent_calls ({len(recent)})")
+    if settings.ENABLE_ACTION_NUDGES:
+        if profile_filled and not is_first:
+            sections.append("returning_nudge")
+        elif is_first:
+            sections.append("first_caller_nudge")
+    if is_first:
+        sections.append("bootstrap")
+    logger.debug("Prompt sections: %s", ", ".join(sections))
+
     return "\n".join(lines), is_first
 
 
@@ -266,6 +284,25 @@ def build_settings_config(
                     "headers": headers,
                 },
                 "prompt": prompt,
+                "functions": [
+                    {
+                        "name": "end_call",
+                        "description": (
+                            "End the phone call gracefully. Use when the conversation "
+                            "has concluded or the caller says goodbye."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "farewell": {
+                                    "type": "string",
+                                    "description": "Goodbye message to speak before hanging up",
+                                },
+                            },
+                            "required": ["farewell"],
+                        },
+                    },
+                ],
             },
             "speak": {
                 "provider": {"type": "deepgram", "model": settings.AGENT_VOICE},
