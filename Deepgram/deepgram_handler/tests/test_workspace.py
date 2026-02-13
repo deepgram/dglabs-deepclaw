@@ -118,8 +118,10 @@ def test_parse_json_response_empty():
 async def test_call_anthropic_success():
     mock_response = httpx.Response(
         200,
-        json={"content": [{"type": "text", "text": "Summary here."}]},
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        json={
+            "choices": [{"message": {"content": "Summary here.", "role": "assistant"}}]
+        },
+        request=httpx.Request("POST", "http://localhost:18789/v1/chat/completions"),
     )
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -127,15 +129,15 @@ async def test_call_anthropic_success():
     mock_client.post = AsyncMock(return_value=mock_response)
 
     with patch("app.services.workspace.httpx.AsyncClient", return_value=mock_client):
-        result = await call_anthropic("test-key", "Extract info", "You are helpful")
+        result = await call_anthropic("gw-token", "Extract info", "You are helpful")
 
     assert result == "Summary here."
     call_kwargs = mock_client.post.call_args[1]
-    assert call_kwargs["headers"]["x-api-key"] == "test-key"
+    assert call_kwargs["headers"]["Authorization"] == "Bearer gw-token"
     body = call_kwargs["json"]
-    assert body["model"] == "claude-sonnet-4-5-20250929"
-    assert body["messages"][0]["content"] == "Extract info"
-    assert body["system"] == "You are helpful"
+    assert body["model"] == "litellm/claude-sonnet-4-5-20250929"
+    assert body["messages"][0]["content"] == "You are helpful"
+    assert body["messages"][1]["content"] == "Extract info"
 
 
 @pytest.mark.asyncio
@@ -149,7 +151,7 @@ async def test_call_anthropic_http_error():
     mock_response = httpx.Response(
         500,
         json={"error": "internal"},
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        request=httpx.Request("POST", "http://localhost:18789/v1/chat/completions"),
     )
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)

@@ -84,6 +84,23 @@ def _extract_last_user_message(body: bytes) -> str | None:
     return None
 
 
+def _chunk_has_content(chunk: bytes) -> bool:
+    """Check if an SSE chunk contains actual assistant text content.
+
+    SSE streaming chat completions send an initial chunk with just
+    ``{"delta": {"role": "assistant"}}`` before any real text.  We only
+    want to cancel the filler timer when the LLM has started producing
+    actual answer text — i.e. ``"content": "<non-empty>"``.
+    """
+    idx = chunk.find(b'"content":"')
+    if idx == -1:
+        return False
+    # Position right after the opening quote of the value.
+    after = idx + len(b'"content":"')
+    # Non-empty content means the next byte is NOT a closing quote.
+    return after < len(chunk) and chunk[after : after + 1] != b'"'
+
+
 @router.api_route("/v1/chat/completions", methods=["POST"])
 async def proxy_chat_completions(request: Request):
     """Proxy POST /v1/chat/completions to the local OpenClaw gateway.
@@ -109,14 +126,22 @@ async def proxy_chat_completions(request: Request):
     if dg_ws and threshold_ms > 0:
         user_message = _extract_last_user_message(body)
         dynamic_phrase_holder: list[str | None] = [None]
+        logger.info(
+            "Filler armed: threshold=%dms dynamic=%s user_msg=%s",
+            threshold_ms,
+            settings.FILLER_DYNAMIC,
+            repr(user_message[:60]) if user_message else None,
+        )
 
         # Kick off dynamic generation in parallel
         if settings.FILLER_DYNAMIC and settings.OPENCLAW_GATEWAY_TOKEN and user_message:
 
             async def _gen():
-                dynamic_phrase_holder[0] = await generate_filler_phrase(
+                phrase = await generate_filler_phrase(
                     user_message, settings.OPENCLAW_GATEWAY_TOKEN
                 )
+                dynamic_phrase_holder[0] = phrase
+                logger.info("Dynamic filler ready: %s", phrase)
 
             asyncio.create_task(_gen())
 
@@ -127,7 +152,9 @@ async def proxy_chat_completions(request: Request):
             if not phrase:
                 phrases = settings.filler_phrases_list
                 phrase = random.choice(phrases) if phrases else None
+                logger.info("Using static filler: %s", phrase)
             if not phrase:
+                logger.info("No filler phrase available, skipping injection")
                 return
             try:
                 logger.info("Injecting filler: %s", phrase)
@@ -153,11 +180,21 @@ async def proxy_chat_completions(request: Request):
 
     async def stream_body():
         try:
-            first_chunk = True
+            filler_cancelled = False
             async for chunk in _filtered_stream(resp.aiter_bytes()):
-                if first_chunk and filler_task and not filler_task.done():
+                # Cancel filler only when real content text starts streaming.
+                # SSE streams send an initial chunk with just {"delta":{"role":"..."}}
+                # before any actual text — cancelling on that would kill the filler
+                # even when the real response takes 10+ seconds (e.g. web search).
+                if (
+                    not filler_cancelled
+                    and filler_task
+                    and not filler_task.done()
+                    and _chunk_has_content(chunk)
+                ):
                     filler_task.cancel()
-                    first_chunk = False
+                    filler_cancelled = True
+                    logger.info("Filler cancelled: real content arrived")
                 yield chunk
         finally:
             if filler_task and not filler_task.done():

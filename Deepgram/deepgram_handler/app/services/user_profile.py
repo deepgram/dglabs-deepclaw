@@ -221,7 +221,7 @@ async def extract_user_profile(settings, call_info: CallInfo) -> None:
 
         prompt = PROFILE_PROMPT_TEMPLATE.format(transcript=transcript_text)
         raw = await call_anthropic(
-            settings.ANTHROPIC_API_KEY,
+            settings.OPENCLAW_GATEWAY_TOKEN,
             prompt,
             PROFILE_SYSTEM_PROMPT,
         )

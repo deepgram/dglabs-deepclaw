@@ -17,8 +17,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 WORKSPACE_DIR = Path.home() / ".openclaw" / "workspace"
-SONNET_MODEL = "claude-sonnet-4-5-20250929"
-API_URL = "https://api.anthropic.com/v1/messages"
+SONNET_MODEL = "litellm/claude-sonnet-4-5-20250929"
+GATEWAY_URL = "http://localhost:18789/v1/chat/completions"
 TIMEOUT_S = 30.0
 MAX_TOKENS = 1024
 
@@ -87,48 +87,53 @@ def parse_json_response(raw: str) -> dict | None:
 
 
 async def call_anthropic(
-    api_key: str,
+    gateway_token: str,
     prompt: str,
     system_prompt: str,
     max_tokens: int = MAX_TOKENS,
 ) -> str | None:
-    """Call Claude Sonnet via the Anthropic Messages API.
+    """Call Claude Sonnet via the local OpenClaw gateway.
+
+    Routes through localhost:18789 so we inherit the gateway's LLM
+    provider auth rather than needing a direct Anthropic API key.
 
     Returns the text response, or None on any failure.
     """
-    if not api_key:
+    if not gateway_token:
         return None
 
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                API_URL,
+                GATEWAY_URL,
                 headers={
                     "Content-Type": "application/json",
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
+                    "Authorization": f"Bearer {gateway_token}",
                 },
                 json={
                     "model": SONNET_MODEL,
                     "max_tokens": max_tokens,
-                    "system": system_prompt,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
                 },
                 timeout=TIMEOUT_S,
             )
 
             if resp.status_code != 200:
-                logger.warning("Anthropic API returned %d", resp.status_code)
+                logger.warning("Gateway API returned %d", resp.status_code)
                 return None
 
             data = resp.json()
-            content = data.get("content", [])
-            if not content:
+            choices = data.get("choices", [])
+            if not choices:
                 return None
 
-            text = content[0].get("text", "").strip()
+            text = choices[0].get("message", {}).get("content", "").strip()
             return text or None
 
     except Exception:
-        logger.debug("Anthropic API call failed", exc_info=True)
+        logger.debug("Gateway API call failed", exc_info=True)
         return None
