@@ -134,11 +134,15 @@ async def proxy_chat_completions(request: Request):
         )
 
         # Kick off dynamic generation in parallel
-        if settings.FILLER_DYNAMIC and settings.OPENCLAW_GATEWAY_TOKEN and user_message:
+        dynamic_started = False
+        if settings.FILLER_DYNAMIC and settings.ANTHROPIC_API_KEY and user_message:
+            dynamic_started = True
 
             async def _gen():
                 phrase = await generate_filler_phrase(
-                    user_message, settings.OPENCLAW_GATEWAY_TOKEN
+                    user_message,
+                    settings.ANTHROPIC_API_KEY,
+                    base_url=settings.ANTHROPIC_BASE_URL,
                 )
                 dynamic_phrase_holder[0] = phrase
                 logger.info("Dynamic filler ready: %s", phrase)
@@ -149,20 +153,36 @@ async def proxy_chat_completions(request: Request):
         async def _inject_filler():
             await asyncio.sleep(threshold_ms / 1000)
             phrase = dynamic_phrase_holder[0]
+            if phrase:
+                logger.info("Dynamic filler available at threshold: %s", phrase)
+            elif dynamic_started:
+                # Grace period: wait up to 500ms more for the dynamic phrase
+                logger.info("Dynamic filler not ready at threshold, waiting up to 500ms...")
+                for _ in range(5):
+                    await asyncio.sleep(0.1)
+                    phrase = dynamic_phrase_holder[0]
+                    if phrase:
+                        logger.info("Dynamic filler arrived during grace period: %s", phrase)
+                        break
             if not phrase:
                 phrases = settings.filler_phrases_list
                 phrase = random.choice(phrases) if phrases else None
-                logger.info("Using static filler: %s", phrase)
+                if phrase:
+                    logger.info("Falling back to static filler: %s", phrase)
+                else:
+                    logger.warning(
+                        "No filler phrase available (dynamic=None, static list empty), skipping injection"
+                    )
             if not phrase:
-                logger.info("No filler phrase available, skipping injection")
                 return
             try:
-                logger.info("Injecting filler: %s", phrase)
+                logger.info("Injecting filler phrase: %s", phrase)
                 await dg_ws.send(
                     json.dumps({"type": "InjectAgentMessage", "message": phrase})
                 )
+                logger.info("Filler phrase injected successfully")
             except Exception:
-                logger.debug("Failed to inject filler", exc_info=True)
+                logger.warning("Failed to inject filler phrase", exc_info=True)
 
         filler_task = asyncio.create_task(_inject_filler())
 
@@ -181,6 +201,7 @@ async def proxy_chat_completions(request: Request):
     async def stream_body():
         try:
             filler_cancelled = False
+            tool_names_logged: set[str] = set()
             async for chunk in _filtered_stream(resp.aiter_bytes()):
                 # Cancel filler only when real content text starts streaming.
                 # SSE streams send an initial chunk with just {"delta":{"role":"..."}}
@@ -195,6 +216,25 @@ async def proxy_chat_completions(request: Request):
                     filler_task.cancel()
                     filler_cancelled = True
                     logger.info("Filler cancelled: real content arrived")
+
+                # Detect tool usage in SSE stream for observability
+                if b'"tool_calls"' in chunk or b'"function_call"' in chunk:
+                    try:
+                        for line in chunk.split(b"\n"):
+                            if not line.startswith(b"data: "):
+                                continue
+                            payload = json.loads(line[6:])
+                            for choice in payload.get("choices", []):
+                                delta = choice.get("delta", {})
+                                for tc in delta.get("tool_calls", []):
+                                    fn = tc.get("function", {})
+                                    name = fn.get("name", "")
+                                    if name and name not in tool_names_logged:
+                                        tool_names_logged.add(name)
+                                        logger.info("Tool call detected: %s", name)
+                    except Exception:
+                        pass  # best-effort logging
+
                 yield chunk
         finally:
             if filler_task and not filler_task.done():

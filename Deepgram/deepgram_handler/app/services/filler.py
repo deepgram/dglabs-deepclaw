@@ -1,22 +1,25 @@
-"""Dynamic filler phrase generation via Claude Haiku.
+"""Dynamic filler phrase generation via Claude Haiku (direct Anthropic API).
 
 Generates short, context-aware phrases to fill dead air during voice calls
-while the LLM or tool calls are processing. Routes through the local OpenClaw
-gateway (which handles LLM provider auth). Falls back gracefully to None on
-any failure (timeout, network error, missing token).
+while the LLM or tool calls are processing. Calls the Anthropic Messages API
+directly (bypassing the local gateway) so the request doesn't get queued
+behind the main LLM call that's causing the delay in the first place.
+
+Falls back gracefully to None on any failure (timeout, network error,
+missing API key).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-HAIKU_MODEL = "litellm/claude-haiku-4-5-20251001"
-GATEWAY_URL = "http://localhost:18789/v1/chat/completions"
+HAIKU_MODEL = "claude-haiku-4-5-20251001"
 HARD_TIMEOUT_S = 2.0
 MAX_TOKENS = 50
 
@@ -32,30 +35,42 @@ def _build_prompt(user_message: str) -> str:
     )
 
 
-async def generate_filler_phrase(user_message: str, gateway_token: str) -> str | None:
+async def generate_filler_phrase(
+    user_message: str,
+    anthropic_api_key: str,
+    base_url: str = "https://api.anthropic.com",
+) -> str | None:
     """Generate a context-aware filler phrase via Claude Haiku.
 
-    Routes through the local OpenClaw gateway so we inherit its LLM
-    provider auth rather than needing a direct Anthropic API key.
+    Calls the Anthropic Messages API directly so the request bypasses the
+    local gateway (which is busy with the main LLM call).
 
     Returns the phrase string, or None on any failure.
     """
-    if not gateway_token:
+    if not anthropic_api_key:
+        logger.warning("Haiku filler: no ANTHROPIC_API_KEY set, skipping")
         return None
 
+    url = f"{base_url.rstrip('/')}/v1/messages"
+    t0 = time.monotonic()
+    logger.info(
+        "Haiku filler: starting direct Anthropic request (model=%s url=%s timeout=%.1fs)",
+        HAIKU_MODEL, url, HARD_TIMEOUT_S,
+    )
     try:
         async with asyncio.timeout(HARD_TIMEOUT_S):
             async with httpx.AsyncClient() as client:
+                logger.info("Haiku filler: sending POST to %s ...", url)
                 resp = await client.post(
-                    GATEWAY_URL,
+                    url,
                     headers={
                         "Content-Type": "application/json",
-                        "Authorization": f"Bearer {gateway_token}",
+                        "x-api-key": anthropic_api_key,
+                        "anthropic-version": "2023-06-01",
                     },
                     json={
                         "model": HAIKU_MODEL,
                         "max_tokens": MAX_TOKENS,
-                        "stream": False,
                         "messages": [
                             {"role": "user", "content": _build_prompt(user_message)}
                         ],
@@ -63,21 +78,43 @@ async def generate_filler_phrase(user_message: str, gateway_token: str) -> str |
                     timeout=HARD_TIMEOUT_S,
                 )
 
+                elapsed_ms = (time.monotonic() - t0) * 1000
+                logger.info(
+                    "Haiku filler: Anthropic responded %d (%d bytes) in %.0fms",
+                    resp.status_code, len(resp.content), elapsed_ms,
+                )
                 if resp.status_code != 200:
-                    logger.warning("Haiku filler returned %d", resp.status_code)
+                    logger.warning(
+                        "Haiku filler: bad status %d — body: %s",
+                        resp.status_code, resp.text[:300],
+                    )
                     return None
 
                 data = resp.json()
-                choices = data.get("choices", [])
-                if not choices:
+
+                # Anthropic Messages API returns {"content": [{"type": "text", "text": "..."}]}
+                content_blocks = data.get("content", [])
+                if not content_blocks:
+                    logger.warning("Haiku filler: no content blocks in response: %s", data)
                     return None
 
-                text = choices[0].get("message", {}).get("content", "").strip()
+                text = ""
+                for block in content_blocks:
+                    if block.get("type") == "text":
+                        text = block.get("text", "").strip()
+                        break
+
+                if text:
+                    logger.info("Haiku filler: generated phrase in %.0fms: %s", elapsed_ms, text)
+                else:
+                    logger.warning("Haiku filler: empty text in response: %s", data)
                 return text or None
 
     except (asyncio.TimeoutError, TimeoutError):
-        logger.debug("Haiku filler timed out")
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.warning("Haiku filler: timed out after %.0fms (limit=%.1fs)", elapsed_ms, HARD_TIMEOUT_S)
         return None
     except Exception:
-        logger.debug("Haiku filler failed", exc_info=True)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.warning("Haiku filler: unexpected error after %.0fms", elapsed_ms, exc_info=True)
         return None
