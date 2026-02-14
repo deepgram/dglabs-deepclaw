@@ -39,8 +39,14 @@ class Settings(BaseSettings):
     FIRST_CALLER_NUDGE_WINDOW_SEC: int = 15
     RETURNING_CALLER_NUDGE_WINDOW_SEC: int = 45
 
-    # Control plane proxy URL (for outbound SMS)
+    # Control plane proxy URL (for outbound SMS/calls).
+    # When empty, falls back to direct Twilio API using the credentials below.
     TWILIO_PROXY_URL: str = ""
+
+    # Direct Twilio credentials (used when TWILIO_PROXY_URL is empty)
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
 
     # Filler phrases (for voice call dead-air prevention)
     FILLER_THRESHOLD_MS: int = 1500
