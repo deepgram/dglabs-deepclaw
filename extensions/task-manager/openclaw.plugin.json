@@ -1,0 +1,8 @@
+{
+  "id": "task-manager",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

@@ -3,7 +3,7 @@ import type { AppViewState } from "./app-view-state.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
-import { DEFAULT_CRON_FORM } from "./app-defaults.ts";
+import { DEFAULT_CRON_FORM, DEFAULT_TASK_FORM } from "./app-defaults.ts";
 import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
@@ -53,6 +53,16 @@ import {
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
+import {
+  loadTasksList,
+  addTask,
+  updateTask,
+  toggleTaskStatus,
+  removeTask,
+  archiveDoneTask,
+  archiveAllDone,
+  taskToForm,
+} from "./controllers/tasks.ts";
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
@@ -80,6 +90,7 @@ import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkills } from "./views/skills.ts";
+import { renderTasks } from "./views/tasks.ts";
 import { renderUsage } from "./views/usage.ts";
 
 const AVATAR_DATA_RE = /^data:/i;
@@ -634,6 +645,58 @@ export function renderApp(state: AppViewState) {
                 onRun: (job) => runCronJob(state, job),
                 onRemove: (job) => removeCronJob(state, job),
                 onLoadRuns: (jobId) => loadCronRuns(state, jobId),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "tasks"
+            ? renderTasks({
+                loading: state.tasksLoading,
+                tasks: state.tasksList,
+                error: state.tasksError,
+                busy: state.tasksBusy,
+                form: state.tasksForm,
+                editingId: state.tasksEditingId,
+                formOpen: state.tasksFormOpen,
+                filter: state.tasksFilter,
+                expandedId: state.tasksExpandedId,
+                onFormChange: (patch) => (state.tasksForm = { ...state.tasksForm, ...patch }),
+                onFilterChange: (filter) => (state.tasksFilter = filter),
+                onRefresh: () => loadTasksList(state),
+                onNewTask: () => {
+                  state.tasksEditingId = null;
+                  state.tasksForm = { ...DEFAULT_TASK_FORM };
+                  state.tasksFormOpen = true;
+                },
+                onAdd: async () => {
+                  await addTask(state);
+                  if (!state.tasksError) {
+                    state.tasksFormOpen = false;
+                  }
+                },
+                onSave: async () => {
+                  await updateTask(state);
+                  if (!state.tasksError) {
+                    state.tasksFormOpen = false;
+                  }
+                },
+                onEdit: (task) => {
+                  state.tasksEditingId = task.id;
+                  state.tasksForm = taskToForm(task);
+                  state.tasksFormOpen = true;
+                },
+                onCancelEdit: () => {
+                  state.tasksEditingId = null;
+                  state.tasksForm = { ...DEFAULT_TASK_FORM };
+                  state.tasksFormOpen = false;
+                },
+                onToggle: (task) =>
+                  toggleTaskStatus(state, task, task.status === "done" ? "open" : "done"),
+                onRemove: (task) => removeTask(state, task),
+                onExpand: (taskId) => (state.tasksExpandedId = taskId),
+                onArchive: (task) => archiveDoneTask(state, task),
+                onArchiveAllDone: () => archiveAllDone(state),
               })
             : nothing
         }

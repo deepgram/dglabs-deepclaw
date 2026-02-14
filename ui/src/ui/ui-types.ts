@@ -34,3 +34,14 @@ export type CronFormState = {
   deliveryTo: string;
   timeoutSeconds: string;
 };
+
+export type TaskFormState = {
+  title: string;
+  notes: string;
+  dueDate: string;
+  dueAt: string;
+  assignee: string;
+  reminderAction: string;
+  reminderChannel: string;
+  reminderNote: string;
+};
