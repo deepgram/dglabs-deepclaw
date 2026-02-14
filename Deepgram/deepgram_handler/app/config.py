@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Voice agent configuration
     AGENT_LISTEN_MODEL: str = "flux-general-en"
-    AGENT_THINK_MODEL: str = "anthropic/claude-haiku-4-5"
+    AGENT_THINK_MODEL: str = "anthropic/claude-sonnet-4-5"
     AGENT_VOICE: str = "aura-2-thalia-en"
     AGENT_PROMPT: str = (
         "You are on a phone call with someone for the first time. "
@@ -49,15 +49,6 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
 
-    _DEFAULT_FILLER_PHRASES: list[str] = [
-        "Hmm, let me think about that.",
-        "Good question, one sec.",
-        "Oh interesting, give me a moment.",
-        "Let me look into that.",
-        "Hmm, let me see.",
-        "One moment while I think on that.",
-    ]
-
     # Post-call extraction
     TIMEZONE: str = "UTC"
     CALLS_MAX_ENTRIES: int = 50
@@ -77,6 +68,15 @@ class Settings(BaseSettings):
     )
     IDLE_PROMPT_MESSAGE: str = "Are you still there?"
     IDLE_EXIT_MESSAGE: str = "Alright, I'll let you go. Call back anytime. Goodbye."
+
+    _DEFAULT_FILLER_PHRASES: list[str] = [
+        "Hmm, let me think about that.",
+        "Good question, one sec.",
+        "Oh interesting, give me a moment.",
+        "Let me look into that.",
+        "Hmm, let me see.",
+        "One moment while I think on that.",
+    ]
 
     @property
     def filler_phrases_list(self) -> list[str]:
