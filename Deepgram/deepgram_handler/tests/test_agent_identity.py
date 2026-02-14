@@ -143,7 +143,7 @@ async def test_extract_identity_fills_empty(tmp_path, monkeypatch):
 
     class FakeSettings:
         OPENCLAW_AGENT_ID = "main"
-        ANTHROPIC_API_KEY = "test-key"
+        OPENCLAW_GATEWAY_TOKEN = "gw-token"
 
     call_info = CallInfo(
         call_id="abc123",
@@ -183,7 +183,7 @@ async def test_extract_identity_skips_when_populated(tmp_path, monkeypatch):
 
     class FakeSettings:
         OPENCLAW_AGENT_ID = "main"
-        ANTHROPIC_API_KEY = "test-key"
+        OPENCLAW_GATEWAY_TOKEN = "gw-token"
 
     call_info = CallInfo(
         call_id="abc123",
@@ -219,7 +219,7 @@ async def test_extract_identity_discards_generic_name(tmp_path, monkeypatch):
 
     class FakeSettings:
         OPENCLAW_AGENT_ID = "main"
-        ANTHROPIC_API_KEY = "test-key"
+        OPENCLAW_GATEWAY_TOKEN = "gw-token"
 
     call_info = CallInfo(
         call_id="abc123",
