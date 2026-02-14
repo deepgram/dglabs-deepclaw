@@ -5,12 +5,19 @@ so that external callers (e.g., Deepgram) can reach it on the standard
 HTTPS port without needing a dedicated IP for a non-standard port.
 """
 
+import asyncio
+import json
 import logging
+import random
 from typing import AsyncIterator
 
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
+
+from app.config import get_settings
+from app.services.filler import generate_filler_phrase
+from app.services.session_registry import get_ws
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +62,52 @@ async def _filtered_stream(raw_stream: AsyncIterator[bytes]) -> AsyncIterator[by
         yield buf
 
 
+def _extract_last_user_message(body: bytes) -> str | None:
+    """Extract the last user message text from an OpenAI-format request body."""
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    messages = data.get("messages", [])
+    for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    return part.get("text")
+        return None
+    return None
+
+
+def _chunk_has_content(chunk: bytes) -> bool:
+    """Check if an SSE chunk contains actual assistant text content.
+
+    SSE streaming chat completions send an initial chunk with just
+    ``{"delta": {"role": "assistant"}}`` before any real text.  We only
+    want to cancel the filler timer when the LLM has started producing
+    actual answer text — i.e. ``"content": "<non-empty>"``.
+    """
+    idx = chunk.find(b'"content":"')
+    if idx == -1:
+        return False
+    # Position right after the opening quote of the value.
+    after = idx + len(b'"content":"')
+    # Non-empty content means the next byte is NOT a closing quote.
+    return after < len(chunk) and chunk[after : after + 1] != b'"'
+
+
 @router.api_route("/v1/chat/completions", methods=["POST"])
 async def proxy_chat_completions(request: Request):
-    """Proxy POST /v1/chat/completions to the local OpenClaw gateway."""
+    """Proxy POST /v1/chat/completions to the local OpenClaw gateway.
+
+    Injects filler phrases via Deepgram InjectAgentMessage when the
+    response takes longer than FILLER_THRESHOLD_MS.
+    """
     body = await request.body()
     headers = {
         k: v
@@ -65,7 +115,61 @@ async def proxy_chat_completions(request: Request):
         if k.lower() not in ("host", "content-length", "transfer-encoding")
     }
 
-    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10))
+    # --- Filler setup ---
+    settings = get_settings()
+    session_key = request.headers.get("x-openclaw-session-key")
+    dg_ws = get_ws(session_key) if session_key else None
+    threshold_ms = settings.FILLER_THRESHOLD_MS
+
+    filler_task: asyncio.Task | None = None
+
+    if dg_ws and threshold_ms > 0:
+        user_message = _extract_last_user_message(body)
+        dynamic_phrase_holder: list[str | None] = [None]
+        logger.info(
+            "Filler armed: threshold=%dms dynamic=%s user_msg=%s",
+            threshold_ms,
+            settings.FILLER_DYNAMIC,
+            repr(user_message[:60]) if user_message else None,
+        )
+
+        # Kick off dynamic generation in parallel
+        if settings.FILLER_DYNAMIC and settings.OPENCLAW_GATEWAY_TOKEN and user_message:
+
+            async def _gen():
+                phrase = await generate_filler_phrase(
+                    user_message, settings.OPENCLAW_GATEWAY_TOKEN
+                )
+                dynamic_phrase_holder[0] = phrase
+                logger.info("Dynamic filler ready: %s", phrase)
+
+            asyncio.create_task(_gen())
+
+        # Schedule filler injection after threshold
+        async def _inject_filler():
+            await asyncio.sleep(threshold_ms / 1000)
+            phrase = dynamic_phrase_holder[0]
+            if not phrase:
+                phrases = settings.filler_phrases_list
+                phrase = random.choice(phrases) if phrases else None
+                logger.info("Using static filler: %s", phrase)
+            if not phrase:
+                logger.info("No filler phrase available, skipping injection")
+                return
+            try:
+                logger.info("Injecting filler: %s", phrase)
+                await dg_ws.send(
+                    json.dumps({"type": "InjectAgentMessage", "message": phrase})
+                )
+            except Exception:
+                logger.debug("Failed to inject filler", exc_info=True)
+
+        filler_task = asyncio.create_task(_inject_filler())
+
+    # --- Forward to OpenClaw ---
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10)
+    )
     req = client.build_request(
         "POST",
         f"{OPENCLAW_BASE}/v1/chat/completions",
@@ -76,9 +180,25 @@ async def proxy_chat_completions(request: Request):
 
     async def stream_body():
         try:
+            filler_cancelled = False
             async for chunk in _filtered_stream(resp.aiter_bytes()):
+                # Cancel filler only when real content text starts streaming.
+                # SSE streams send an initial chunk with just {"delta":{"role":"..."}}
+                # before any actual text — cancelling on that would kill the filler
+                # even when the real response takes 10+ seconds (e.g. web search).
+                if (
+                    not filler_cancelled
+                    and filler_task
+                    and not filler_task.done()
+                    and _chunk_has_content(chunk)
+                ):
+                    filler_task.cancel()
+                    filler_cancelled = True
+                    logger.info("Filler cancelled: real content arrived")
                 yield chunk
         finally:
+            if filler_task and not filler_task.done():
+                filler_task.cancel()
             await resp.aclose()
             await client.aclose()
 

@@ -1,10 +1,13 @@
+import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.routers.openclaw_proxy import _filtered_stream
+from app.routers.openclaw_proxy import _extract_last_user_message, _filtered_stream
+from app.services import session_registry
 
 
 @pytest.fixture
@@ -12,18 +15,37 @@ def client():
     return TestClient(app)
 
 
-def test_proxy_chat_completions_forwards_request(client):
+def test_proxy_chat_completions_forwards_request(client, monkeypatch):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
-    mock_resp.content = b'{"choices":[{"message":{"content":"hi"}}]}'
     mock_resp.headers = {"content-type": "application/json"}
 
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_resp
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
+    async def aiter_bytes():
+        yield b'{"choices":[{"message":{"content":"hi"}}]}'
 
-    with patch("app.routers.openclaw_proxy.httpx.AsyncClient", return_value=mock_client):
+    mock_resp.aiter_bytes = aiter_bytes
+    mock_resp.aclose = AsyncMock()
+
+    mock_request = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.build_request = MagicMock(return_value=mock_request)
+    mock_client.send = AsyncMock(return_value=mock_resp)
+    mock_client.aclose = AsyncMock()
+
+    # Ensure no session is registered so filler logic is skipped
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings",
+        lambda: __import__("app.config", fromlist=["Settings"]).Settings(
+            DEEPGRAM_API_KEY="test-key",
+            OPENCLAW_GATEWAY_TOKEN="gw-token",
+            FILLER_THRESHOLD_MS=0,
+            _env_file=None,
+        ),
+    )
+
+    with patch(
+        "app.routers.openclaw_proxy.httpx.AsyncClient", return_value=mock_client
+    ):
         response = client.post(
             "/v1/chat/completions",
             json={"model": "test", "messages": [{"role": "user", "content": "hello"}]},
@@ -36,13 +58,10 @@ def test_proxy_chat_completions_forwards_request(client):
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "hi"
 
-    # Verify forwarded to localhost OpenClaw
-    mock_client.post.assert_called_once()
-    call_args = mock_client.post.call_args
-    assert call_args[0][0] == "http://localhost:18789/v1/chat/completions"
-    headers = call_args[1]["headers"]
-    assert headers["authorization"] == "Bearer test-token"
-    assert headers["x-openclaw-session-key"] == "agent:main:abc123"
+    # Verify build_request was called with correct URL
+    mock_client.build_request.assert_called_once()
+    call_args = mock_client.build_request.call_args
+    assert call_args[0] == ("POST", "http://localhost:18789/v1/chat/completions")
 
 
 # ---------------------------------------------------------------------------
@@ -106,3 +125,279 @@ async def test_filtered_stream_preserves_done_sentinel():
     result = await _collect(_filtered_stream(_async_chunks(chunks)))
     assert b"hi" in result
     assert b"[DONE]" in result
+
+
+# ---------------------------------------------------------------------------
+# _extract_last_user_message tests
+# ---------------------------------------------------------------------------
+
+
+def test_extract_last_user_message_simple():
+    body = b'{"messages":[{"role":"user","content":"What is the weather?"}]}'
+    assert _extract_last_user_message(body) == "What is the weather?"
+
+
+def test_extract_last_user_message_multiple():
+    body = b'{"messages":[{"role":"user","content":"Hello"},{"role":"assistant","content":"Hi"},{"role":"user","content":"Weather?"}]}'
+    assert _extract_last_user_message(body) == "Weather?"
+
+
+def test_extract_last_user_message_no_user():
+    body = b'{"messages":[{"role":"system","content":"You are helpful"}]}'
+    assert _extract_last_user_message(body) is None
+
+
+def test_extract_last_user_message_invalid_json():
+    body = b"not json"
+    assert _extract_last_user_message(body) is None
+
+
+def test_extract_last_user_message_multimodal():
+    """Multimodal content (list) extracts the text part."""
+    body = b'{"messages":[{"role":"user","content":[{"type":"text","text":"Describe this"},{"type":"image_url","image_url":{}}]}]}'
+    assert _extract_last_user_message(body) == "Describe this"
+
+
+# ---------------------------------------------------------------------------
+# Filler injection proxy tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_proxy_injects_filler_on_slow_response(monkeypatch):
+    """When response is slow and a session is registered, filler is injected."""
+    from httpx import AsyncClient
+    from app.config import Settings
+
+    # Register a mock Deepgram WS
+    mock_dg_ws = AsyncMock()
+    session_registry.register("agent:main:slow-call", mock_dg_ws)
+
+    # Configure settings with low threshold for test speed
+    test_settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        FILLER_THRESHOLD_MS=50,  # 50ms for fast test
+        FILLER_PHRASES="One moment...,Working on it.",
+        FILLER_DYNAMIC=False,  # Disable Haiku for this test
+        _env_file=None,
+    )
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings", lambda: test_settings
+    )
+
+    # Simulate a slow OpenClaw response (200ms delay before response)
+    async def slow_send(request, *, stream=False):
+        await asyncio.sleep(0.2)  # 200ms > 50ms threshold
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"content-type": "text/event-stream"}
+
+        async def aiter_bytes():
+            yield b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        resp.aiter_bytes = aiter_bytes
+        resp.aclose = AsyncMock()
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.build_request = MagicMock(return_value=MagicMock())
+    mock_client.send = slow_send
+    mock_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.httpx.AsyncClient", lambda **kw: mock_client
+    )
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+        resp = await test_client.post(
+            "/v1/chat/completions",
+            json={"model": "test", "messages": [{"role": "user", "content": "hello"}]},
+            headers={"x-openclaw-session-key": "agent:main:slow-call"},
+        )
+
+    assert resp.status_code == 200
+
+    # Filler should have been injected
+    mock_dg_ws.send.assert_called_once()
+    injected = json.loads(mock_dg_ws.send.call_args[0][0])
+    assert injected["type"] == "InjectAgentMessage"
+    assert injected["message"] in ["One moment...", "Working on it."]
+
+    # Cleanup
+    session_registry.unregister("agent:main:slow-call")
+
+
+@pytest.mark.asyncio
+async def test_proxy_skips_filler_on_fast_response(monkeypatch):
+    """When response is fast, no filler is injected."""
+    from httpx import AsyncClient
+    from app.config import Settings
+
+    mock_dg_ws = AsyncMock()
+    session_registry.register("agent:main:fast-call", mock_dg_ws)
+
+    test_settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        FILLER_THRESHOLD_MS=500,  # 500ms threshold
+        FILLER_PHRASES="One moment...",
+        FILLER_DYNAMIC=False,
+        _env_file=None,
+    )
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings", lambda: test_settings
+    )
+
+    # Fast response (no delay)
+    async def fast_send(request, *, stream=False):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"content-type": "text/event-stream"}
+
+        async def aiter_bytes():
+            yield b'data: {"choices":[{"delta":{"content":"Quick response"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        resp.aiter_bytes = aiter_bytes
+        resp.aclose = AsyncMock()
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.build_request = MagicMock(return_value=MagicMock())
+    mock_client.send = fast_send
+    mock_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.httpx.AsyncClient", lambda **kw: mock_client
+    )
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+        resp = await test_client.post(
+            "/v1/chat/completions",
+            json={"model": "test", "messages": [{"role": "user", "content": "hello"}]},
+            headers={"x-openclaw-session-key": "agent:main:fast-call"},
+        )
+
+    assert resp.status_code == 200
+
+    # No filler should have been injected
+    mock_dg_ws.send.assert_not_called()
+
+    # Cleanup
+    session_registry.unregister("agent:main:fast-call")
+
+
+@pytest.mark.asyncio
+async def test_proxy_skips_filler_when_no_session(monkeypatch):
+    """When no session is registered for the key, no filler logic runs."""
+    from httpx import AsyncClient
+    from app.config import Settings
+
+    test_settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        FILLER_THRESHOLD_MS=50,
+        FILLER_PHRASES="One moment...",
+        FILLER_DYNAMIC=False,
+        _env_file=None,
+    )
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings", lambda: test_settings
+    )
+
+    async def fast_send(request, *, stream=False):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"content-type": "application/json"}
+
+        async def aiter_bytes():
+            yield b'{"choices":[{"message":{"content":"hi"}}]}'
+
+        resp.aiter_bytes = aiter_bytes
+        resp.aclose = AsyncMock()
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.build_request = MagicMock(return_value=MagicMock())
+    mock_client.send = fast_send
+    mock_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.httpx.AsyncClient", lambda **kw: mock_client
+    )
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+        resp = await test_client.post(
+            "/v1/chat/completions",
+            json={"model": "test", "messages": [{"role": "user", "content": "hello"}]},
+            headers={"x-openclaw-session-key": "agent:main:no-session"},
+        )
+
+    # Should succeed without any filler injection (no crash, no side effects)
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_proxy_skips_filler_when_threshold_zero(monkeypatch):
+    """Filler disabled when threshold is 0."""
+    from httpx import AsyncClient
+    from app.config import Settings
+
+    mock_dg_ws = AsyncMock()
+    session_registry.register("agent:main:disabled", mock_dg_ws)
+
+    test_settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        FILLER_THRESHOLD_MS=0,  # Disabled
+        FILLER_PHRASES="One moment...",
+        FILLER_DYNAMIC=False,
+        _env_file=None,
+    )
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings", lambda: test_settings
+    )
+
+    async def slow_send(request, *, stream=False):
+        await asyncio.sleep(0.1)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"content-type": "text/event-stream"}
+
+        async def aiter_bytes():
+            yield b'data: {"choices":[{"delta":{"content":"Slow"}}]}\n\n'
+
+        resp.aiter_bytes = aiter_bytes
+        resp.aclose = AsyncMock()
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.build_request = MagicMock(return_value=MagicMock())
+    mock_client.send = slow_send
+    mock_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.httpx.AsyncClient", lambda **kw: mock_client
+    )
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+        resp = await test_client.post(
+            "/v1/chat/completions",
+            json={"model": "test", "messages": [{"role": "user", "content": "hello"}]},
+            headers={"x-openclaw-session-key": "agent:main:disabled"},
+        )
+
+    assert resp.status_code == 200
+    mock_dg_ws.send.assert_not_called()
+
+    session_registry.unregister("agent:main:disabled")

@@ -18,6 +18,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from app.config import Settings, get_settings
+from app.services import session_registry
 from app.services.twilio_media import (
     build_clear_event,
     build_media_event,
@@ -38,7 +39,6 @@ VOICE_FORMAT_RULES = (
     'Do NOT start your response with filler phrases like "Let me check" or "One moment" — '
     "that is handled automatically. Jump straight into the answer."
     "If you are asked to text or call, use the twilio action"
-
 )
 
 KNOWN_USER_PROMPT = (
@@ -46,7 +46,6 @@ KNOWN_USER_PROMPT = (
     "If a request is ambiguous or you're unsure what the caller means, ask a quick clarifying question "
     "before acting. Don't guess or add requirements they didn't ask for."
     "If you are asked to text or call, use the twilio action"
-
 )
 
 
@@ -92,7 +91,9 @@ async def _generate_next_greeting(settings: Settings, session_key: str) -> None:
                 },
                 json={
                     "model": settings.AGENT_THINK_MODEL,
-                    "messages": [{"role": "user", "content": GREETING_GENERATION_PROMPT}],
+                    "messages": [
+                        {"role": "user", "content": GREETING_GENERATION_PROMPT}
+                    ],
                     "stream": False,
                 },
                 timeout=15.0,
@@ -136,7 +137,7 @@ def build_settings_config(
         prompt = prompt_override
         greeting = greeting_override or "Hello!"
         logger.info("Using prompt override (outbound call)")
-    elif (user_context := _read_user_context()):
+    elif user_context := _read_user_context():
         prompt = f"{KNOWN_USER_PROMPT}\n\nHere is what you know about the caller:\n{user_context}"
         greeting = _read_next_greeting() or "Welcome back! How may I help today?"
         logger.info("Using known-user prompt (USER.md found)")
@@ -292,9 +293,13 @@ async def run_agent_bridge(
         logger.exception("Failed to connect to Deepgram Agent")
         return
 
+    session_key = None
     try:
         if call_id is None:
             call_id = uuid.uuid4().hex[:12]
+
+        session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
+
         config = build_settings_config(
             settings,
             call_id=call_id,
@@ -303,6 +308,8 @@ async def run_agent_bridge(
         )
         await dg_ws.send(json.dumps(config))
         logger.info("Sent settings config to Deepgram")
+
+        session_registry.register(session_key, dg_ws)
 
         stop_event = asyncio.Event()
 
@@ -314,6 +321,9 @@ async def run_agent_bridge(
         await asyncio.gather(t2d, d2t, return_exceptions=True)
 
     finally:
+        if session_key:
+            session_registry.unregister(session_key)
+
         try:
             await dg_ws.close()
         except Exception:
@@ -321,7 +331,8 @@ async def run_agent_bridge(
 
         # Post-call: generate next greeting (inbound calls only)
         if not prompt_override:
-            session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
+            if not session_key:
+                session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
             await _generate_next_greeting(settings, session_key=session_key)
 
     logger.info("Agent bridge finished")
