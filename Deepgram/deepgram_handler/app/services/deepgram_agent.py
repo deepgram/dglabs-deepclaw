@@ -35,6 +35,7 @@ from app.services.user_md_parser import (
     parse_calls_md,
     parse_user_markdown,
 )
+from app.services.session_timers import SessionTimers, SessionTimerCallbacks
 from app.services.user_profile import extract_user_profile
 from app.services.workspace import CallInfo, TranscriptEntry
 
@@ -68,7 +69,7 @@ def _read_next_greeting() -> str | None:
     return _read_file(NEXT_GREETING_PATH)
 
 
-def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
+def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> tuple[str, bool]:
     """Build a structured voice prompt from workspace files.
 
     Returns a tuple of (prompt_text, is_first_caller).
@@ -103,7 +104,36 @@ def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
     else:
         now = datetime.now(timezone.utc)
         lines.append(f"- Current UTC time: {now.strftime('%Y-%m-%d %H:%M UTC')}.")
-    lines.append("- If you are asked to text or call someone, use the twilio action.")
+    if caller_phone:
+        lines.append(f"- The caller's phone number is {caller_phone}.")
+    lines.append(
+        "- To send a text message, use: "
+        "curl -s -X POST http://localhost:8000/actions/send-sms "
+        "-H 'Content-Type: application/json' "
+        "-d '{\"to\": \"<phone>\", \"body\": \"<message>\"}'"
+    )
+    lines.append("- Do NOT use the message tool for SMS — it won't work. Always use the curl command above.")
+    lines.append("")
+    lines.append("Background tasks:")
+    lines.append(
+        "- For anything that takes more than a few seconds (research, writing, analysis, "
+        "lookups, multi-step tasks), use sessions_spawn to run it in the background."
+    )
+    lines.append(
+        "- Tell the caller you'll text them the results. Example: "
+        "\"I'll research that and text you what I find.\""
+    )
+    lines.append("- Do NOT make the caller wait on the phone while you do long tool calls or web searches.")
+    lines.append("- Quick factual answers (weather, time, simple math) can be answered directly.")
+    if caller_phone:
+        lines.append(
+            f"- When spawning a background task, include these delivery instructions for the sub-agent: "
+            f"\"Send results via SMS to {caller_phone} using: "
+            f"curl -s -X POST http://localhost:8000/actions/send-sms "
+            f"-H 'Content-Type: application/json' "
+            f"-d '{{\"to\": \"{caller_phone}\", \"body\": \"<results>\"}}'\" "
+            f"Do NOT use the message tool."
+        )
 
     # -- Caller context (returning caller) --
     if profile_filled:
@@ -158,44 +188,213 @@ def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
         )
         lines.append("- Goal: names exchanged, something useful done, give them a reason to call back.")
 
+    # Debug: summarize which sections were included
+    sections = ["voice_constraints"]
+    if profile_filled:
+        display_name = profile.call_name or profile.name or "unnamed"
+        sections.append(f"caller_context ({display_name})")
+        if calls_md:
+            recent = parse_calls_md(calls_md, count=3)
+            if recent:
+                sections.append(f"recent_calls ({len(recent)})")
+    if settings.ENABLE_ACTION_NUDGES:
+        if profile_filled and not is_first:
+            sections.append("returning_nudge")
+        elif is_first:
+            sections.append("first_caller_nudge")
+    if is_first:
+        sections.append("bootstrap")
+    logger.info("Prompt sections: %s", ", ".join(sections))
+
     return "\n".join(lines), is_first
 
 
-GREETING_GENERATION_PROMPT = (
-    "Generate a short, punchy greeting for the next time this person calls. "
-    "One sentence max. No quotes. No emojis. Just the raw greeting text."
-)
-
-OPENCLAW_URL = "http://localhost:18789/v1/chat/completions"
+GREETING_MODEL = "claude-haiku-4-5-20251001"
+GREETING_TIMEOUT_S = 5.0
 
 
-async def _generate_next_greeting(settings: Settings, session_key: str) -> None:
-    """Ask OpenClaw to generate a greeting for the next call and write it to disk."""
+def _build_greeting_prompt(
+    transcript: list | None = None,
+    caller_name: str | None = None,
+) -> str:
+    """Build a contextual greeting generation prompt."""
+    parts = []
+    if caller_name:
+        parts.append(f"The caller's name is {caller_name}.")
+    if transcript:
+        # Include last few exchanges for context
+        recent = transcript[-6:] if len(transcript) > 6 else transcript
+        lines = []
+        for entry in recent:
+            speaker = "Caller" if entry.speaker == "user" else "You"
+            lines.append(f"  {speaker}: {entry.text}")
+        parts.append("Recent conversation:\n" + "\n".join(lines))
+
+    context = " ".join(parts) if parts else "You don't know much about this caller yet."
+
+    return (
+        f"{context}\n\n"
+        "Generate a short, punchy greeting for the next time this person calls. "
+        "Reference something specific from the conversation if possible. "
+        "One sentence max. No quotes. No emojis. Just the raw greeting text."
+    )
+
+
+async def _generate_next_greeting(
+    settings: Settings,
+    session_key: str,
+    transcript: list | None = None,
+    caller_name: str | None = None,
+) -> None:
+    """Generate a greeting for the next call via direct Anthropic API.
+
+    Calls Anthropic directly (bypassing the local gateway) so the request
+    doesn't get queued behind long-running tool calls.
+    """
+    api_key = settings.ANTHROPIC_API_KEY
+    if not api_key:
+        logger.warning("Next greeting: no ANTHROPIC_API_KEY, skipping")
+        return
+
+    prompt = _build_greeting_prompt(transcript, caller_name)
+    logger.info("Next greeting prompt: %s", prompt[:200])
+
+    url = f"{settings.ANTHROPIC_BASE_URL.rstrip('/')}/v1/messages"
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                OPENCLAW_URL,
-                headers={
-                    "Authorization": f"Bearer {settings.OPENCLAW_GATEWAY_TOKEN}",
-                    "x-openclaw-session-key": session_key,
-                },
-                json={
-                    "model": settings.AGENT_THINK_MODEL,
-                    "messages": [
-                        {"role": "user", "content": GREETING_GENERATION_PROMPT}
-                    ],
-                    "stream": False,
-                },
-                timeout=15.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            greeting = data["choices"][0]["message"]["content"].strip()
-            if greeting:
-                NEXT_GREETING_PATH.write_text(greeting)
-                logger.info("Next greeting saved: %s", greeting[:80])
+        async with asyncio.timeout(GREETING_TIMEOUT_S):
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                    },
+                    json={
+                        "model": GREETING_MODEL,
+                        "max_tokens": 100,
+                        "messages": [
+                            {"role": "user", "content": prompt}
+                        ],
+                    },
+                    timeout=GREETING_TIMEOUT_S,
+                )
+                if resp.status_code != 200:
+                    logger.warning("Next greeting: Anthropic returned %d: %s", resp.status_code, resp.text[:200])
+                    return
+
+                data = resp.json()
+                content_blocks = data.get("content", [])
+                greeting = ""
+                for block in content_blocks:
+                    if block.get("type") == "text":
+                        greeting = block.get("text", "").strip()
+                        break
+
+                if greeting:
+                    NEXT_GREETING_PATH.write_text(greeting)
+                    logger.info("Next greeting saved: %s", greeting[:80])
+                else:
+                    logger.warning("Next greeting: empty response from Anthropic")
+    except (asyncio.TimeoutError, TimeoutError):
+        logger.warning("Next greeting: timed out after %.1fs", GREETING_TIMEOUT_S)
     except Exception:
         logger.exception("Failed to generate next greeting")
+
+
+async def _notify_child_sessions(
+    settings: Settings,
+    session_key: str,
+    caller_number: str | None = None,
+) -> None:
+    """Notify child sessions that the voice call has ended.
+
+    Queries the gateway for sessions spawned by this voice call and sends
+    each one a message instructing it to deliver results via SMS instead.
+    """
+    from app.services.gateway import call_gateway
+
+    try:
+        logger.info("Querying child sessions for %s", session_key)
+        result = await call_gateway(
+            method="sessions.list",
+            params={
+                "spawnedBy": session_key,
+                "limit": 50,
+                "includeGlobal": False,
+                "includeUnknown": False,
+            },
+            gateway_url="ws://localhost:18789",
+            gateway_token=settings.OPENCLAW_GATEWAY_TOKEN,
+            timeout=5.0,
+        )
+
+        if not result:
+            logger.info("No child sessions result (gateway returned None)")
+            return
+
+        sessions = result.get("sessions", [])
+        if not sessions:
+            logger.info("No child sessions found for %s", session_key)
+            return
+
+        logger.info(
+            "Found %d child session(s) for %s: %s",
+            len(sessions),
+            session_key,
+            [s.get("key", "?") for s in sessions],
+        )
+
+        for session in sessions:
+            child_key = session.get("key", "")
+            if not child_key:
+                logger.warning("Child session missing key, skipping: %s", session)
+                continue
+
+            if caller_number:
+                message = (
+                    f"The voice call has ended — the caller is no longer on the phone. "
+                    f"Send your results via SMS to {caller_number}. Use this command:\n"
+                    f'curl -s -X POST http://localhost:8000/actions/send-sms '
+                    f'-H "Content-Type: application/json" '
+                    f'-d \'{{"to": "{caller_number}", "body": "<your results here>"}}\'\n'
+                    f"Do NOT use the message tool — it requires channels that aren't configured. "
+                    f"Use the curl command above instead."
+                )
+            else:
+                message = (
+                    "The voice call has ended — the caller is no longer on the phone. "
+                    "If you have results to deliver, send them via SMS using: "
+                    "curl -s -X POST http://localhost:8000/actions/send-sms "
+                    '-H "Content-Type: application/json" '
+                    "-d '{\"to\": \"<phone>\", \"body\": \"<results>\"}'"
+                )
+
+            idempotency_key = f"call-ended-{session_key}-{child_key}"
+            logger.info(
+                "Notifying child session %s (caller=%s, idempotencyKey=%s)",
+                child_key,
+                caller_number or "unknown",
+                idempotency_key,
+            )
+            notify_result = await call_gateway(
+                method="agent",
+                params={
+                    "message": message,
+                    "sessionKey": child_key,
+                    "idempotencyKey": idempotency_key,
+                },
+                gateway_url="ws://localhost:18789",
+                gateway_token=settings.OPENCLAW_GATEWAY_TOKEN,
+                timeout=10.0,
+            )
+            if notify_result is not None:
+                logger.info("Child session %s notified successfully", child_key)
+            else:
+                logger.warning("Child session %s notification failed (gateway returned None)", child_key)
+
+    except Exception:
+        logger.exception("Failed to notify child sessions")
 
 
 def build_settings_config(
@@ -203,6 +402,7 @@ def build_settings_config(
     call_id: str,
     prompt_override: str | None = None,
     greeting_override: str | None = None,
+    caller_phone: str | None = None,
 ) -> dict:
     """Build the Deepgram Agent Settings message.
 
@@ -213,6 +413,8 @@ def build_settings_config(
         prompt.  Used for outbound calls where the callee is not the user.
     greeting_override:
         When set, use this greeting instead of the default.
+    caller_phone:
+        Caller's phone number (E.164 format) for background task delivery.
     """
     headers = {
         "Authorization": f"Bearer {settings.OPENCLAW_GATEWAY_TOKEN}",
@@ -228,7 +430,7 @@ def build_settings_config(
         greeting = greeting_override or "Hello!"
         logger.info("Using prompt override (outbound call)")
     else:
-        prompt, is_first = _build_voice_prompt(settings)
+        prompt, is_first = _build_voice_prompt(settings, caller_phone=caller_phone)
         if not is_first:
             # Returning caller — use parsed name for fallback greeting
             user_md = _read_file(USER_MD_PATH)
@@ -266,6 +468,25 @@ def build_settings_config(
                     "headers": headers,
                 },
                 "prompt": prompt,
+                "functions": [
+                    {
+                        "name": "end_call",
+                        "description": (
+                            "End the phone call gracefully. Use when the conversation "
+                            "has concluded or the caller says goodbye."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "farewell": {
+                                    "type": "string",
+                                    "description": "Goodbye message to speak before hanging up",
+                                },
+                            },
+                            "required": ["farewell"],
+                        },
+                    },
+                ],
             },
             "speak": {
                 "provider": {"type": "deepgram", "model": settings.AGENT_VOICE},
@@ -316,8 +537,11 @@ async def _deepgram_to_twilio(
     stream_sid: str,
     stop_event: asyncio.Event,
     transcript: list[TranscriptEntry] | None = None,
+    timers: SessionTimers | None = None,
 ) -> None:
     """Forward audio from Deepgram to Twilio and handle agent events."""
+    end_call_farewell_pending = False
+
     try:
         async for message in dg_ws:
             if stop_event.is_set():
@@ -336,6 +560,7 @@ async def _deepgram_to_twilio(
 
                 if msg_type == "Error":
                     logger.error("Deepgram error: %s", json.dumps(msg))
+
                 elif msg_type == "ConversationText":
                     role = msg.get("role", "")
                     content = msg.get("content", "")
@@ -345,13 +570,60 @@ async def _deepgram_to_twilio(
                         transcript.append(
                             TranscriptEntry(timestamp=time.time(), speaker=speaker, text=content)
                         )
+                    if timers:
+                        if role == "user":
+                            timers.on_user_spoke()
+                        elif role == "assistant":
+                            timers.on_agent_started_speaking()
+
+                elif msg_type == "UserStartedSpeaking":
+                    await twilio_ws.send_text(build_clear_event(stream_sid))
+                    if timers:
+                        timers.on_user_started_speaking()
+
+                elif msg_type == "AgentStartedSpeaking":
+                    if timers:
+                        timers.on_agent_started_speaking()
+
+                elif msg_type == "AgentAudioDone":
+                    if timers:
+                        timers.on_agent_audio_done()
+                    if end_call_farewell_pending:
+                        end_call_farewell_pending = False
+                        logger.info("end_call farewell spoken, hanging up in 1s")
+                        await asyncio.sleep(1.0)
+                        stop_event.set()
+                        return
+
+                elif msg_type == "FunctionCallRequest":
+                    fn_name = msg.get("function_name", "")
+                    fn_call_id = msg.get("function_call_id", "")
+                    fn_input = msg.get("input", {})
+
+                    if fn_name == "end_call":
+                        logger.info("end_call function invoked by LLM")
+                        if timers:
+                            timers.clear_all()
+                        # ACK the function call
+                        await dg_ws.send(json.dumps({
+                            "type": "FunctionCallResponse",
+                            "function_call_id": fn_call_id,
+                            "output": json.dumps({"ok": True}),
+                        }))
+                        # Inject farewell
+                        farewell = fn_input.get("farewell", "Goodbye!")
+                        await dg_ws.send(json.dumps({
+                            "type": "InjectAgentMessage",
+                            "message": farewell,
+                        }))
+                        end_call_farewell_pending = True
+                    else:
+                        logger.info("Unhandled function call: %s", fn_name)
+
                 elif msg_type == "Warning":
                     logger.warning("Deepgram warning: %s", json.dumps(msg))
                 else:
                     logger.info("Deepgram event: %s", msg_type)
-
-                if msg_type == "UserStartedSpeaking":
-                    await twilio_ws.send_text(build_clear_event(stream_sid))
 
     except ConnectionClosed:
         logger.info("Deepgram WS closed")
@@ -403,6 +675,7 @@ async def run_agent_bridge(
         return
 
     session_key = None
+    timers: SessionTimers | None = None
     try:
         if call_id is None:
             call_id = uuid.uuid4().hex[:12]
@@ -414,6 +687,7 @@ async def run_agent_bridge(
             call_id=call_id,
             prompt_override=prompt_override,
             greeting_override=greeting_override,
+            caller_phone=caller_phone,
         )
         await dg_ws.send(json.dumps(config))
         logger.info("Sent settings config to Deepgram")
@@ -423,14 +697,48 @@ async def run_agent_bridge(
         stop_event = asyncio.Event()
         transcript: list[TranscriptEntry] = []
 
+        # Create session timers
+        if settings.SESSION_TIMER_ENABLED:
+            logger.info(
+                "Session timers enabled (reengage=%dms, exit=%dms, idle_prompt=%dms, idle_exit=%dms)",
+                settings.RESPONSE_REENGAGE_MS,
+                settings.RESPONSE_EXIT_MS,
+                settings.IDLE_PROMPT_MS,
+                settings.IDLE_EXIT_MS,
+            )
+            timers = SessionTimers(
+                {
+                    "enabled": True,
+                    "response_reengage_ms": settings.RESPONSE_REENGAGE_MS,
+                    "response_exit_ms": settings.RESPONSE_EXIT_MS,
+                    "idle_prompt_ms": settings.IDLE_PROMPT_MS,
+                    "idle_exit_ms": settings.IDLE_EXIT_MS,
+                    "response_reengage_message": settings.RESPONSE_REENGAGE_MESSAGE,
+                    "response_exit_message": settings.RESPONSE_EXIT_MESSAGE,
+                    "idle_prompt_message": settings.IDLE_PROMPT_MESSAGE,
+                    "idle_exit_message": settings.IDLE_EXIT_MESSAGE,
+                },
+                SessionTimerCallbacks(
+                    inject_message=lambda msg: dg_ws.send(
+                        json.dumps({"type": "InjectAgentMessage", "message": msg})
+                    ),
+                    end_call=lambda: (stop_event.set(), asyncio.sleep(0))[1],
+                    log=lambda msg: logger.info(msg),
+                ),
+            )
+
         t2d = asyncio.create_task(_twilio_to_deepgram(twilio_ws, dg_ws, stop_event))
         d2t = asyncio.create_task(
-            _deepgram_to_twilio(dg_ws, twilio_ws, stream_sid, stop_event, transcript)
+            _deepgram_to_twilio(dg_ws, twilio_ws, stream_sid, stop_event, transcript, timers)
         )
 
         await asyncio.gather(t2d, d2t, return_exceptions=True)
 
     finally:
+        if timers:
+            timers.clear_all()
+            logger.info("Session timers cleared on bridge teardown")
+
         if session_key:
             session_registry.unregister(session_key)
 
@@ -444,8 +752,34 @@ async def run_agent_bridge(
             if not session_key:
                 session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
 
-            # Greeting generation (existing)
-            await _generate_next_greeting(settings, session_key=session_key)
+            logger.info(
+                "Post-call tasks starting (session=%s, caller_phone=%s, transcript_len=%d)",
+                session_key,
+                caller_phone or "none",
+                len(transcript),
+            )
+
+            # Resolve caller name for greeting context
+            user_md = _read_file(USER_MD_PATH)
+            profile = parse_user_markdown(user_md) if user_md else None
+            caller_name = None
+            if profile:
+                caller_name = profile.call_name or profile.name or None
+
+            # Greeting generation with conversation context
+            await _generate_next_greeting(
+                settings,
+                session_key=session_key,
+                transcript=transcript,
+                caller_name=caller_name,
+            )
+
+            # Notify child sessions that the call ended (fire-and-forget)
+            if session_key:
+                try:
+                    await _notify_child_sessions(settings, session_key, caller_phone)
+                except Exception:
+                    logger.debug("Child session notification failed", exc_info=True)
 
             # Post-call extraction pipeline
             if transcript and settings.POST_CALL_EXTRACTION:

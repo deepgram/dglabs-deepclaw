@@ -6,9 +6,13 @@ messages to ``{TWILIO_PROXY_URL}/api/sms/send`` so the control plane can
 handle the actual Twilio API call.
 """
 
+import logging
+
 import httpx
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 async def send_sms(
@@ -51,14 +55,21 @@ async def send_sms(
             "Set the environment variable to the deepclaw-control base URL."
         )
 
+    url = f"{proxy_url}/api/sms/send"
     payload: dict = {"to": to, "text": text, "from": from_number}
     if media_urls is not None:
         payload["mediaUrls"] = media_urls
 
+    logger.info(
+        "Outbound SMS: POST %s to=%s text_len=%d from=%s",
+        url, to, len(text or ""), from_number or "default",
+    )
+
     async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{proxy_url}/api/sms/send",
-            json=payload,
+        resp = await client.post(url, json=payload)
+        logger.info(
+            "Outbound SMS: response status=%d body=%s",
+            resp.status_code, resp.text[:300],
         )
         resp.raise_for_status()
         return resp.json()

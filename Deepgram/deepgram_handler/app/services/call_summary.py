@@ -72,7 +72,7 @@ async def generate_call_summary(settings, call_info: CallInfo) -> None:
         )
 
         summary = await call_anthropic(
-            settings.ANTHROPIC_API_KEY,
+            settings.OPENCLAW_GATEWAY_TOKEN,
             prompt,
             SUMMARY_SYSTEM_PROMPT,
             max_tokens=500,
