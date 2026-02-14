@@ -321,11 +321,17 @@ async def _notify_child_sessions(
             logger.info("No child sessions found for %s", session_key)
             return
 
-        logger.info("Notifying %d child session(s) that call ended", len(sessions))
+        logger.info(
+            "Found %d child session(s) for %s: %s",
+            len(sessions),
+            session_key,
+            [s.get("key", "?") for s in sessions],
+        )
 
         for session in sessions:
             child_key = session.get("key", "")
             if not child_key:
+                logger.warning("Child session missing key, skipping: %s", session)
                 continue
 
             if caller_number:
@@ -339,17 +345,28 @@ async def _notify_child_sessions(
                     "If you have results to deliver, send them via SMS using the twilio action."
                 )
 
-            logger.info("Notifying child session %s", child_key)
-            await call_gateway(
+            idempotency_key = f"call-ended-{session_key}-{child_key}"
+            logger.info(
+                "Notifying child session %s (caller=%s, idempotencyKey=%s)",
+                child_key,
+                caller_number or "unknown",
+                idempotency_key,
+            )
+            notify_result = await call_gateway(
                 method="agent",
                 params={
                     "message": message,
                     "sessionKey": child_key,
+                    "idempotencyKey": idempotency_key,
                 },
                 gateway_url="ws://localhost:18789",
                 gateway_token=settings.OPENCLAW_GATEWAY_TOKEN,
                 timeout=10.0,
             )
+            if notify_result is not None:
+                logger.info("Child session %s notified successfully", child_key)
+            else:
+                logger.warning("Child session %s notification failed (gateway returned None)", child_key)
 
     except Exception:
         logger.exception("Failed to notify child sessions")
@@ -705,6 +722,13 @@ async def run_agent_bridge(
         if not prompt_override:
             if not session_key:
                 session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
+
+            logger.info(
+                "Post-call tasks starting (session=%s, caller_phone=%s, transcript_len=%d)",
+                session_key,
+                caller_phone or "none",
+                len(transcript),
+            )
 
             # Resolve caller name for greeting context
             user_md = _read_file(USER_MD_PATH)
