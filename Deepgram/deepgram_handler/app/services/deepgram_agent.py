@@ -104,7 +104,15 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
     else:
         now = datetime.now(timezone.utc)
         lines.append(f"- Current UTC time: {now.strftime('%Y-%m-%d %H:%M UTC')}.")
-    lines.append("- If you are asked to text or call someone, use the twilio action.")
+    if caller_phone:
+        lines.append(f"- The caller's phone number is {caller_phone}.")
+    lines.append(
+        "- To send a text message, use: "
+        "curl -s -X POST http://localhost:8000/actions/send-sms "
+        "-H 'Content-Type: application/json' "
+        "-d '{\"to\": \"<phone>\", \"body\": \"<message>\"}'"
+    )
+    lines.append("- Do NOT use the message tool for SMS — it won't work. Always use the curl command above.")
     lines.append("")
     lines.append("Background tasks:")
     lines.append(
@@ -119,15 +127,13 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
     lines.append("- Quick factual answers (weather, time, simple math) can be answered directly.")
     if caller_phone:
         lines.append(
-            f"- When spawning a background task, include these instructions for the sub-agent: "
-            f"\"When done, send results via SMS to {caller_phone} using: "
-            f'curl -s -X POST http://localhost:8000/actions/send-sms '
-            f'-H \'Content-Type: application/json\' '
-            f'-d \'{{\"to\": \"{caller_phone}\", \"body\": \"<your results here>\"}}\'"'
+            f"- When spawning a background task, include these delivery instructions for the sub-agent: "
+            f"\"Send results via SMS to {caller_phone} using: "
+            f"curl -s -X POST http://localhost:8000/actions/send-sms "
+            f"-H 'Content-Type: application/json' "
+            f"-d '{{\"to\": \"{caller_phone}\", \"body\": \"<results>\"}}'\" "
+            f"Do NOT use the message tool."
         )
-    lines.append(
-        "- Do NOT use the message tool for SMS. Use the send-sms action endpoint above."
-    )
 
     # -- Caller context (returning caller) --
     if profile_filled:
