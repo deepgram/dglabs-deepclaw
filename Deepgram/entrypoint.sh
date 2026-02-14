@@ -8,10 +8,39 @@ mkdir -p /home/node/.openclaw
 # (deploy machines created by `fly deploy` don't have control-plane env vars)
 export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
 
-# Resolve env vars in config template on every startup
-# (env vars change when pool machines are claimed and restarted)
-echo "Resolving OpenClaw config from template..."
-envsubst < /seed-data/.openclaw/openclaw.json > /home/node/.openclaw/openclaw.json
+# Resolve env-dependent config values.
+# Env vars change when pool machines are claimed and restarted, so secrets
+# must be refreshed every startup.  But agent-written config (channels,
+# plugins, etc.) lives on the persistent volume and must be preserved.
+CONFIG="/home/node/.openclaw/openclaw.json"
+
+if [ ! -f "$CONFIG" ]; then
+  echo "First boot — seeding OpenClaw config from template..."
+  envsubst < /seed-data/.openclaw/openclaw.json > "$CONFIG"
+else
+  echo "Updating env-dependent config values (preserving agent changes)..."
+  node -e "
+    const fs = require('fs');
+    const cfg = JSON.parse(fs.readFileSync('$CONFIG', 'utf8'));
+
+    // Refresh secrets / env-dependent values
+    cfg.env = cfg.env || {};
+    cfg.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || cfg.env.ANTHROPIC_API_KEY || '';
+
+    cfg.gateway = cfg.gateway || {};
+    cfg.gateway.auth = cfg.gateway.auth || {};
+    cfg.gateway.auth.mode = 'token';
+    cfg.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN || cfg.gateway.auth.token || '';
+
+    cfg.models = cfg.models || {};
+    cfg.models.providers = cfg.models.providers || {};
+    cfg.models.providers.litellm = cfg.models.providers.litellm || {};
+    cfg.models.providers.litellm.baseUrl = process.env.ANTHROPIC_BASE_URL || cfg.models.providers.litellm.baseUrl || '';
+    cfg.models.providers.litellm.apiKey = process.env.ANTHROPIC_API_KEY || cfg.models.providers.litellm.apiKey || '';
+
+    fs.writeFileSync('$CONFIG', JSON.stringify(cfg, null, 2) + '\n');
+  "
+fi
 
 # Seed skills directory (overwrite on every startup to pick up new versions)
 if [ -d /seed-data/.openclaw/skills ]; then

@@ -57,6 +57,9 @@ RUN uv sync --frozen --no-dev
 # Fix ownership so node user can run the app
 RUN chown -R node:node /twilio-proxy
 
+# Make openclaw CLI available on PATH for the agent
+RUN ln -s /app/openclaw.mjs /usr/local/bin/openclaw && chmod +x /app/openclaw.mjs
+
 # Seed data for OpenClaw home volume
 COPY Deepgram/home/ /seed-data/
 

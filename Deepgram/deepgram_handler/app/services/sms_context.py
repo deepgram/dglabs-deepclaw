@@ -96,25 +96,46 @@ async def ask_openclaw(
     settings: Settings,
     session_key: str,
     content: str | list,
+    *,
+    _max_retries: int = 2,
 ) -> str:
-    """Send a message to OpenClaw and return the reply text."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            OPENCLAW_URL,
-            headers={
-                "Authorization": f"Bearer {settings.OPENCLAW_GATEWAY_TOKEN}",
-                "x-openclaw-session-key": session_key,
-            },
-            json={
-                "model": settings.AGENT_THINK_MODEL,
-                "messages": build_sms_messages(content),
-                "stream": False,
-            },
-            timeout=30.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
+    """Send a message to OpenClaw and return the reply text.
+
+    Retries on connection errors (e.g. gateway restarting mid-request).
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_max_retries + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    OPENCLAW_URL,
+                    headers={
+                        "Authorization": f"Bearer {settings.OPENCLAW_GATEWAY_TOKEN}",
+                        "x-openclaw-session-key": session_key,
+                    },
+                    json={
+                        "model": settings.AGENT_THINK_MODEL,
+                        "messages": build_sms_messages(content),
+                        "stream": False,
+                    },
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+        except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
+            last_exc = exc
+            if attempt < _max_retries:
+                logger.warning(
+                    "OpenClaw connection error (attempt %d/%d), retrying: %s",
+                    attempt + 1,
+                    _max_retries + 1,
+                    exc,
+                )
+                await asyncio.sleep(1.5)
+            else:
+                raise
+    raise last_exc  # unreachable, but keeps type checker happy
 
 
 async def send_delayed_reply(
