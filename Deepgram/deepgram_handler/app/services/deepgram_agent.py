@@ -192,16 +192,43 @@ def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
     return "\n".join(lines), is_first
 
 
-GREETING_GENERATION_PROMPT = (
-    "Generate a short, punchy greeting for the next time this person calls. "
-    "One sentence max. No quotes. No emojis. Just the raw greeting text."
-)
-
 GREETING_MODEL = "claude-haiku-4-5-20251001"
 GREETING_TIMEOUT_S = 5.0
 
 
-async def _generate_next_greeting(settings: Settings, session_key: str) -> None:
+def _build_greeting_prompt(
+    transcript: list | None = None,
+    caller_name: str | None = None,
+) -> str:
+    """Build a contextual greeting generation prompt."""
+    parts = []
+    if caller_name:
+        parts.append(f"The caller's name is {caller_name}.")
+    if transcript:
+        # Include last few exchanges for context
+        recent = transcript[-6:] if len(transcript) > 6 else transcript
+        lines = []
+        for entry in recent:
+            speaker = "Caller" if entry.speaker == "user" else "You"
+            lines.append(f"  {speaker}: {entry.text}")
+        parts.append("Recent conversation:\n" + "\n".join(lines))
+
+    context = " ".join(parts) if parts else "You don't know much about this caller yet."
+
+    return (
+        f"{context}\n\n"
+        "Generate a short, punchy greeting for the next time this person calls. "
+        "Reference something specific from the conversation if possible. "
+        "One sentence max. No quotes. No emojis. Just the raw greeting text."
+    )
+
+
+async def _generate_next_greeting(
+    settings: Settings,
+    session_key: str,
+    transcript: list | None = None,
+    caller_name: str | None = None,
+) -> None:
     """Generate a greeting for the next call via direct Anthropic API.
 
     Calls Anthropic directly (bypassing the local gateway) so the request
@@ -211,6 +238,9 @@ async def _generate_next_greeting(settings: Settings, session_key: str) -> None:
     if not api_key:
         logger.warning("Next greeting: no ANTHROPIC_API_KEY, skipping")
         return
+
+    prompt = _build_greeting_prompt(transcript, caller_name)
+    logger.info("Next greeting prompt: %s", prompt[:200])
 
     url = f"{settings.ANTHROPIC_BASE_URL.rstrip('/')}/v1/messages"
     try:
@@ -227,7 +257,7 @@ async def _generate_next_greeting(settings: Settings, session_key: str) -> None:
                         "model": GREETING_MODEL,
                         "max_tokens": 100,
                         "messages": [
-                            {"role": "user", "content": GREETING_GENERATION_PROMPT}
+                            {"role": "user", "content": prompt}
                         ],
                     },
                     timeout=GREETING_TIMEOUT_S,
@@ -676,8 +706,20 @@ async def run_agent_bridge(
             if not session_key:
                 session_key = f"agent:{settings.OPENCLAW_AGENT_ID}:{call_id}"
 
-            # Greeting generation (existing)
-            await _generate_next_greeting(settings, session_key=session_key)
+            # Resolve caller name for greeting context
+            user_md = _read_file(USER_MD_PATH)
+            profile = parse_user_markdown(user_md) if user_md else None
+            caller_name = None
+            if profile:
+                caller_name = profile.call_name or profile.name or None
+
+            # Greeting generation with conversation context
+            await _generate_next_greeting(
+                settings,
+                session_key=session_key,
+                transcript=transcript,
+                caller_name=caller_name,
+            )
 
             # Notify child sessions that the call ended (fire-and-forget)
             if session_key:

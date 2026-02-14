@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Voice agent configuration
     AGENT_LISTEN_MODEL: str = "flux-general-en"
-    AGENT_THINK_MODEL: str = "anthropic/claude-haiku-4-5"
+    AGENT_THINK_MODEL: str = "anthropic/claude-sonnet-4-5"
     AGENT_VOICE: str = "aura-2-thalia-en"
     AGENT_PROMPT: str = (
         "You are on a phone call with someone for the first time. "

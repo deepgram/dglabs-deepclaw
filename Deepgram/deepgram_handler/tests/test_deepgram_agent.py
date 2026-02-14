@@ -96,7 +96,7 @@ def test_build_settings_config_defaults():
 
     think = agent["think"]
     assert think["provider"]["type"] == "open_ai"
-    assert think["provider"]["model"] == "anthropic/claude-haiku-4-5"
+    assert think["provider"]["model"] == "anthropic/claude-sonnet-4-5"
     assert (
         think["endpoint"]["url"]
         == "https://deepclaw-instance.fly.dev/v1/chat/completions"
@@ -277,6 +277,7 @@ def test_build_settings_greeting_file_ignored_for_outbound(tmp_path, monkeypatch
 @pytest.mark.asyncio
 async def test_generate_next_greeting_writes_file(tmp_path, monkeypatch):
     from app.services.deepgram_agent import _generate_next_greeting
+    from app.services.workspace import TranscriptEntry
 
     greeting_file = tmp_path / "NEXT_GREETING.txt"
     monkeypatch.setattr("app.services.deepgram_agent.NEXT_GREETING_PATH", greeting_file)
@@ -296,15 +297,32 @@ async def test_generate_next_greeting_writes_file(tmp_path, monkeypatch):
         "app.services.deepgram_agent.httpx.AsyncClient", lambda: mock_client
     )
 
+    transcript = [
+        TranscriptEntry(timestamp=1.0, speaker="user", text="What's the weather?"),
+        TranscriptEntry(timestamp=2.0, speaker="bot", text="It's sunny today."),
+    ]
+
     settings = Settings(
         DEEPGRAM_API_KEY="test-key",
         OPENCLAW_GATEWAY_TOKEN="gw-token",
         ANTHROPIC_API_KEY="test-anthropic-key",
         _env_file=None,
     )
-    await _generate_next_greeting(settings, session_key="agent:main:abc123")
+    await _generate_next_greeting(
+        settings,
+        session_key="agent:main:abc123",
+        transcript=transcript,
+        caller_name="Bill",
+    )
 
     assert greeting_file.read_text() == "Back again? Let's make it count."
+
+    # Verify the prompt included caller context
+    call_args = mock_client.post.call_args
+    messages = call_args[1]["json"]["messages"]
+    prompt_text = messages[0]["content"]
+    assert "Bill" in prompt_text
+    assert "weather" in prompt_text
 
 
 @pytest.mark.asyncio
@@ -375,6 +393,7 @@ async def test_run_agent_bridge_calls_generate_next_greeting(monkeypatch):
     call_args = mock_generate.call_args
     assert call_args[0][0] is settings
     assert "test-call" in call_args[1]["session_key"]
+    assert "transcript" in call_args[1]
 
 
 @pytest.mark.asyncio
