@@ -69,7 +69,7 @@ def _read_next_greeting() -> str | None:
     return _read_file(NEXT_GREETING_PATH)
 
 
-def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
+def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> tuple[str, bool]:
     """Build a structured voice prompt from workspace files.
 
     Returns a tuple of (prompt_text, is_first_caller).
@@ -117,6 +117,17 @@ def _build_voice_prompt(settings: Settings) -> tuple[str, bool]:
     )
     lines.append("- Do NOT make the caller wait on the phone while you do long tool calls or web searches.")
     lines.append("- Quick factual answers (weather, time, simple math) can be answered directly.")
+    if caller_phone:
+        lines.append(
+            f"- When spawning a background task, include these instructions for the sub-agent: "
+            f"\"When done, send results via SMS to {caller_phone} using: "
+            f'curl -s -X POST http://localhost:8000/actions/send-sms '
+            f'-H \'Content-Type: application/json\' '
+            f'-d \'{{\"to\": \"{caller_phone}\", \"body\": \"<your results here>\"}}\'"'
+        )
+    lines.append(
+        "- Do NOT use the message tool for SMS. Use the send-sms action endpoint above."
+    )
 
     # -- Caller context (returning caller) --
     if profile_filled:
@@ -337,12 +348,20 @@ async def _notify_child_sessions(
             if caller_number:
                 message = (
                     f"The voice call has ended — the caller is no longer on the phone. "
-                    f'Send your results via SMS instead: use the twilio action with target "{caller_number}".'
+                    f"Send your results via SMS to {caller_number}. Use this command:\n"
+                    f'curl -s -X POST http://localhost:8000/actions/send-sms '
+                    f'-H "Content-Type: application/json" '
+                    f'-d \'{{"to": "{caller_number}", "body": "<your results here>"}}\'\n'
+                    f"Do NOT use the message tool — it requires channels that aren't configured. "
+                    f"Use the curl command above instead."
                 )
             else:
                 message = (
                     "The voice call has ended — the caller is no longer on the phone. "
-                    "If you have results to deliver, send them via SMS using the twilio action."
+                    "If you have results to deliver, send them via SMS using: "
+                    "curl -s -X POST http://localhost:8000/actions/send-sms "
+                    '-H "Content-Type: application/json" '
+                    "-d '{\"to\": \"<phone>\", \"body\": \"<results>\"}'"
                 )
 
             idempotency_key = f"call-ended-{session_key}-{child_key}"
@@ -377,6 +396,7 @@ def build_settings_config(
     call_id: str,
     prompt_override: str | None = None,
     greeting_override: str | None = None,
+    caller_phone: str | None = None,
 ) -> dict:
     """Build the Deepgram Agent Settings message.
 
@@ -387,6 +407,8 @@ def build_settings_config(
         prompt.  Used for outbound calls where the callee is not the user.
     greeting_override:
         When set, use this greeting instead of the default.
+    caller_phone:
+        Caller's phone number (E.164 format) for background task delivery.
     """
     headers = {
         "Authorization": f"Bearer {settings.OPENCLAW_GATEWAY_TOKEN}",
@@ -402,7 +424,7 @@ def build_settings_config(
         greeting = greeting_override or "Hello!"
         logger.info("Using prompt override (outbound call)")
     else:
-        prompt, is_first = _build_voice_prompt(settings)
+        prompt, is_first = _build_voice_prompt(settings, caller_phone=caller_phone)
         if not is_first:
             # Returning caller — use parsed name for fallback greeting
             user_md = _read_file(USER_MD_PATH)
@@ -659,6 +681,7 @@ async def run_agent_bridge(
             call_id=call_id,
             prompt_override=prompt_override,
             greeting_override=greeting_override,
+            caller_phone=caller_phone,
         )
         await dg_ws.send(json.dumps(config))
         logger.info("Sent settings config to Deepgram")
