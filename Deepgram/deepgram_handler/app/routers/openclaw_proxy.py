@@ -201,6 +201,7 @@ async def proxy_chat_completions(request: Request):
     async def stream_body():
         try:
             filler_cancelled = False
+            tool_names_logged: set[str] = set()
             async for chunk in _filtered_stream(resp.aiter_bytes()):
                 # Cancel filler only when real content text starts streaming.
                 # SSE streams send an initial chunk with just {"delta":{"role":"..."}}
@@ -215,6 +216,25 @@ async def proxy_chat_completions(request: Request):
                     filler_task.cancel()
                     filler_cancelled = True
                     logger.info("Filler cancelled: real content arrived")
+
+                # Detect tool usage in SSE stream for observability
+                if b'"tool_calls"' in chunk or b'"function_call"' in chunk:
+                    try:
+                        for line in chunk.split(b"\n"):
+                            if not line.startswith(b"data: "):
+                                continue
+                            payload = json.loads(line[6:])
+                            for choice in payload.get("choices", []):
+                                delta = choice.get("delta", {})
+                                for tc in delta.get("tool_calls", []):
+                                    fn = tc.get("function", {})
+                                    name = fn.get("name", "")
+                                    if name and name not in tool_names_logged:
+                                        tool_names_logged.add(name)
+                                        logger.info("Tool call detected: %s", name)
+                    except Exception:
+                        pass  # best-effort logging
+
                 yield chunk
         finally:
             if filler_task and not filler_task.done():

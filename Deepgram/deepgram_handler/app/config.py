@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     # Voice agent configuration
     AGENT_LISTEN_MODEL: str = "flux-general-en"
-    AGENT_THINK_MODEL: str = "anthropic/claude-haiku-4-5"
+    AGENT_THINK_MODEL: str = "anthropic/claude-sonnet-4-5"
     AGENT_VOICE: str = "aura-2-thalia-en"
     AGENT_PROMPT: str = (
         "You are on a phone call with someone for the first time. "
@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     )
     AGENT_GREETING: str = "Hello! How can I help you today?"
 
+    # Action nudge configuration
+    ENABLE_ACTION_NUDGES: bool = True
+    FIRST_CALLER_NUDGE_WINDOW_SEC: int = 15
+    RETURNING_CALLER_NUDGE_WINDOW_SEC: int = 45
+
     # Control plane proxy URL (for outbound SMS)
     TWILIO_PROXY_URL: str = ""
 
@@ -43,6 +48,26 @@ class Settings(BaseSettings):
     FILLER_DYNAMIC: bool = True
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+
+    # Post-call extraction
+    TIMEZONE: str = "UTC"
+    CALLS_MAX_ENTRIES: int = 50
+    POST_CALL_EXTRACTION: bool = True
+
+    # Session timers (voice call dead-air and idle caller handling)
+    SESSION_TIMER_ENABLED: bool = True
+    RESPONSE_REENGAGE_MS: int = 15_000
+    RESPONSE_EXIT_MS: int = 45_000
+    IDLE_PROMPT_MS: int = 30_000
+    IDLE_EXIT_MS: int = 15_000
+    RESPONSE_REENGAGE_MESSAGE: str = (
+        "I'm having trouble with that one. Could you try asking differently?"
+    )
+    RESPONSE_EXIT_MESSAGE: str = (
+        "I'm sorry, I can't respond right now. Talk to you later. Goodbye."
+    )
+    IDLE_PROMPT_MESSAGE: str = "Are you still there?"
+    IDLE_EXIT_MESSAGE: str = "Alright, I'll let you go. Call back anytime. Goodbye."
 
     _DEFAULT_FILLER_PHRASES: list[str] = [
         "Hmm, let me think about that.",
