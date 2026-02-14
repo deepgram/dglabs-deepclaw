@@ -37,6 +37,28 @@ class Settings(BaseSettings):
     # Control plane proxy URL (for outbound SMS)
     TWILIO_PROXY_URL: str = ""
 
+    # Filler phrases (for voice call dead-air prevention)
+    FILLER_THRESHOLD_MS: int = 1500
+    FILLER_PHRASES: str = ""
+    FILLER_DYNAMIC: bool = True
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+
+    _DEFAULT_FILLER_PHRASES: list[str] = [
+        "Hmm, let me think about that.",
+        "Good question, one sec.",
+        "Oh interesting, give me a moment.",
+        "Let me look into that.",
+        "Hmm, let me see.",
+        "One moment while I think on that.",
+    ]
+
+    @property
+    def filler_phrases_list(self) -> list[str]:
+        if self.FILLER_PHRASES:
+            return [p.strip() for p in self.FILLER_PHRASES.split(",") if p.strip()]
+        return self._DEFAULT_FILLER_PHRASES
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
