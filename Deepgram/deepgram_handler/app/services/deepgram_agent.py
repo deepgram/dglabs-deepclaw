@@ -106,13 +106,7 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
         lines.append(f"- Current UTC time: {now.strftime('%Y-%m-%d %H:%M UTC')}.")
     if caller_phone:
         lines.append(f"- The caller's phone number is {caller_phone}.")
-    lines.append(
-        "- To send a text message, use: "
-        "curl -s -X POST http://localhost:8000/actions/send-sms "
-        "-H 'Content-Type: application/json' "
-        "-d '{\"to\": \"<phone>\", \"body\": \"<message>\"}'"
-    )
-    lines.append("- Do NOT use the message tool for SMS — it won't work. Always use the curl command above.")
+    lines.append("- To send a text message, use the send_sms tool (NOT the message tool).")
     lines.append("")
     lines.append("Background tasks:")
     lines.append(
@@ -127,12 +121,11 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
     lines.append("- Quick factual answers (weather, time, simple math) can be answered directly.")
     if caller_phone:
         lines.append(
-            f"- When spawning a background task, include these delivery instructions for the sub-agent: "
-            f"\"Send results via SMS to {caller_phone} using: "
-            f"curl -s -X POST http://localhost:8000/actions/send-sms "
-            f"-H 'Content-Type: application/json' "
-            f"-d '{{\"to\": \"{caller_phone}\", \"body\": \"<results>\"}}'\" "
-            f"Do NOT use the message tool."
+            f"- When spawning a background task, tell the sub-agent to deliver results by calling: "
+            f'task_add({{ title: "Results for caller", dueAt: "<current ISO time>", '
+            f'reminder: {{ action: "message", to: "{caller_phone}", '
+            f'note: "<your results here>" }} }}). '
+            f"The system will text the results automatically."
         )
 
     # -- Caller context (returning caller) --
@@ -354,20 +347,19 @@ async def _notify_child_sessions(
             if caller_number:
                 message = (
                     f"The voice call has ended — the caller is no longer on the phone. "
-                    f"Send your results via SMS to {caller_number}. Use this command:\n"
-                    f'curl -s -X POST http://localhost:8000/actions/send-sms '
-                    f'-H "Content-Type: application/json" '
-                    f'-d \'{{"to": "{caller_number}", "body": "<your results here>"}}\'\n'
-                    f"Do NOT use the message tool — it requires channels that aren't configured. "
-                    f"Use the curl command above instead."
+                    f"Deliver your results by calling: "
+                    f'task_add({{ title: "Results for caller", '
+                    f'dueAt: "{datetime.now(timezone.utc).isoformat()}", '
+                    f'reminder: {{ action: "message", to: "{caller_number}", '
+                    f'note: "<your results summary>" }} }}). '
+                    f"The system will text them automatically."
                 )
             else:
                 message = (
                     "The voice call has ended — the caller is no longer on the phone. "
-                    "If you have results to deliver, send them via SMS using: "
-                    "curl -s -X POST http://localhost:8000/actions/send-sms "
-                    '-H "Content-Type: application/json" '
-                    "-d '{\"to\": \"<phone>\", \"body\": \"<results>\"}'"
+                    "If you have results, deliver them by calling task_add with "
+                    "a reminder (action: 'message') and your results in the note field. "
+                    "The system will text them automatically."
                 )
 
             idempotency_key = f"call-ended-{session_key}-{child_key}"

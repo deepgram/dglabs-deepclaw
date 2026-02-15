@@ -34,9 +34,9 @@ async function deliverReminder(task: Task): Promise<{ ok: boolean; error?: strin
   }
 
   const action = task.reminder.action;
-  const body = task.reminder.note
-    ? `Reminder: ${task.title}\n${task.reminder.note}`
-    : `Reminder: ${task.title}`;
+  // If note is set, use it as the full SMS body (sub-agents put results here).
+  // Otherwise fall back to "Reminder: <title>".
+  const body = task.reminder.note || `Reminder: ${task.title}`;
 
   try {
     if (action === "message") {
@@ -142,7 +142,94 @@ export default {
     log?.info(`[task-manager] sidecarUrl: ${sidecarUrl}`);
 
     // ========================================================================
-    // Tools
+    // Tools — SMS / Call (shared with child agents via sessions_spawn)
+    // ========================================================================
+
+    api.registerTool({
+      name: "send_sms",
+      label: "Send SMS",
+      description:
+        "Send an SMS text message to a phone number via the Twilio sidecar. " +
+        "Use this whenever you need to text someone — it works from any agent session including background tasks spawned via sessions_spawn. " +
+        "Do NOT use the message tool for SMS; use this tool instead.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {
+            type: "string",
+            description: "Recipient phone number in E.164 format (e.g. +15551234567)",
+          },
+          body: { type: "string", description: "Message text to send" },
+        },
+        required: ["to", "body"],
+      },
+      async execute(_toolCallId, params) {
+        const { to, body: msgBody } = params as { to: string; body: string };
+        try {
+          const payload: Record<string, string> = { to, body: msgBody };
+          if (fromPhone) payload.from_number = fromPhone;
+          const resp = await fetch(`${sidecarUrl}/actions/send-sms`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = (await resp.json()) as { ok?: boolean; error?: string };
+          if (data.ok) {
+            log?.info(`[task-manager] send_sms: sent to ${to}`);
+            return { content: [{ type: "text", text: `SMS sent to ${to}` }] };
+          }
+          log?.error(`[task-manager] send_sms: failed — ${JSON.stringify(data)}`);
+          return { content: [{ type: "text", text: `SMS failed: ${JSON.stringify(data)}` }] };
+        } catch (err) {
+          log?.error(`[task-manager] send_sms: error — ${err}`);
+          return { content: [{ type: "text", text: `SMS error: ${String(err)}` }] };
+        }
+      },
+    });
+
+    api.registerTool({
+      name: "make_call",
+      label: "Make Call",
+      description:
+        "Initiate an outbound voice call via the Twilio sidecar. " +
+        "Use when the user asks you to call someone.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {
+            type: "string",
+            description: "Phone number to call in E.164 format (e.g. +15551234567)",
+          },
+          purpose: { type: "string", description: "Brief description of the call purpose" },
+        },
+        required: ["to", "purpose"],
+      },
+      async execute(_toolCallId, params) {
+        const { to, purpose } = params as { to: string; purpose: string };
+        try {
+          const payload: Record<string, string> = { to, purpose };
+          if (fromPhone) payload.from_number = fromPhone;
+          const resp = await fetch(`${sidecarUrl}/actions/make-call`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = (await resp.json()) as { ok?: boolean; error?: string };
+          if (data.ok) {
+            log?.info(`[task-manager] make_call: initiated call to ${to}`);
+            return { content: [{ type: "text", text: `Call initiated to ${to}` }] };
+          }
+          log?.error(`[task-manager] make_call: failed — ${JSON.stringify(data)}`);
+          return { content: [{ type: "text", text: `Call failed: ${JSON.stringify(data)}` }] };
+        } catch (err) {
+          log?.error(`[task-manager] make_call: error — ${err}`);
+          return { content: [{ type: "text", text: `Call error: ${String(err)}` }] };
+        }
+      },
+    });
+
+    // ========================================================================
+    // Tools — Task management
     // ========================================================================
 
     api.registerTool(
