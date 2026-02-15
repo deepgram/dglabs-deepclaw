@@ -1,5 +1,6 @@
 import type { CliDeps } from "../cli/deps.js";
 import type { loadConfig } from "../config/config.js";
+import type { CronService } from "../cron/service.js";
 import type { loadOpenClawPlugins } from "../plugins/loader.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { loadModelCatalog } from "../agents/model-catalog.js";
@@ -28,6 +29,7 @@ export async function startGatewaySidecars(params: {
   pluginRegistry: ReturnType<typeof loadOpenClawPlugins>;
   defaultWorkspaceDir: string;
   deps: CliDeps;
+  cron?: CronService;
   startChannels: () => Promise<void>;
   log: { warn: (msg: string) => void };
   logHooks: {
@@ -145,6 +147,7 @@ export async function startGatewaySidecars(params: {
       registry: params.pluginRegistry,
       config: params.cfg,
       workspaceDir: params.defaultWorkspaceDir,
+      cron: params.cron,
     });
   } catch (err) {
     params.log.warn(`plugin services failed to start: ${String(err)}`);

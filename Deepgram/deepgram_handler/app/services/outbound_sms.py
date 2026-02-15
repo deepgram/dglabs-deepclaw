@@ -9,6 +9,7 @@ Supports two modes:
 """
 
 import logging
+from urllib.parse import urlencode
 
 import httpx
 
@@ -126,8 +127,9 @@ async def _send_via_twilio(
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             url,
-            data=form_data,
-            auth=(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
+            content=urlencode(form_data).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            auth=httpx.BasicAuth(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
         )
         logger.info(
             "Outbound SMS (direct): response status=%d body=%s",

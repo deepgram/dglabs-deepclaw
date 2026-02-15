@@ -7,105 +7,81 @@ import type { Task, TaskReminder, TaskStore } from "./types.js";
 // Resolved at service start from ctx.workspaceDir (the real path inside Docker)
 let resolvedWorkspaceDir: string | undefined;
 
-// Captured from the first gateway method call so the service interval can schedule cron jobs
-let cronServiceRef: { add: Function; remove: Function; list: Function } | null = null;
-
 // Logger ref captured from api.logger at registration time
 let log: { info: Function; warn: Function; error: Function } | null = null;
 
+// Plugin config — captured at registration time
+let ownerPhone: string | undefined;
+let fromPhone: string | undefined;
+let sidecarUrl = "http://localhost:8000";
+
+const MAX_DELIVERY_ATTEMPTS = 3;
+
 // ---------------------------------------------------------------------------
-// Reminder helpers
+// Deterministic reminder delivery
 // ---------------------------------------------------------------------------
 
-function buildReminderPrompt(task: Task): string {
-  const note = task.reminder!.note ? `\nAdditional context: ${task.reminder!.note}` : "";
-  const notesLine = task.notes ? `Task notes: ${task.notes}` : "";
-
-  if (task.reminder!.action === "call") {
-    // Voice call reminder
-    const lines = [
-      `REMINDER TASK: "${task.title}" (task ID: ${task.id})`,
-      "",
-      `You MUST use the voice_call tool to call the user about this reminder.`,
-      `Call them with: voice_call({ action: "initiate_call", message: "<your reminder message>" }). Voice calls and SMS are the preferred delivery channels.`,
-      `Do NOT just respond with text — you must actually place the call using the tool.`,
-      note,
-      notesLine,
-      "",
-      `After the call is placed, call task_update({ id: "${task.id}", status: "done" }) to mark this task complete.`,
-    ];
-    return lines.filter(Boolean).join("\n");
+async function deliverReminder(task: Task): Promise<{ ok: boolean; error?: string }> {
+  if (!task.reminder || !task.dueAt) {
+    return { ok: false, error: "no reminder or dueAt" };
+  }
+  const phone = task.reminder.to || ownerPhone;
+  if (!phone) {
+    return {
+      ok: false,
+      error: "no phone number — set reminder.to or plugins.entries.task-manager.config.ownerPhone",
+    };
   }
 
-  // Message reminder
-  const channel = task.reminder!.channel;
-  const channelHint = channel
-    ? `Use channel "${channel}": message({ action: "send", channel: "${channel}", message: "<your reminder>" })`
-    : `Use the message tool: message({ action: "send", message: "<your reminder>" }). Prefer SMS (twilio-sms) above other channels — SMS reaches the user's phone directly.`;
+  const action = task.reminder.action;
+  const body = task.reminder.note
+    ? `Reminder: ${task.title}\n${task.reminder.note}`
+    : `Reminder: ${task.title}`;
 
-  const lines = [
-    `REMINDER TASK: "${task.title}" (task ID: ${task.id})`,
-    "",
-    `You MUST use the message tool to send a message to the user about this reminder.`,
-    channelHint,
-    `Do NOT just respond with text — you must actually send the message using the message tool.`,
-    note,
-    notesLine,
-    "",
-    `After the message is sent, call task_update({ id: "${task.id}", status: "done" }) to mark this task complete.`,
-  ];
-  return lines.filter(Boolean).join("\n");
-}
-
-async function scheduleCronForTask(
-  task: Task,
-  cron: { add: Function },
-): Promise<string | undefined> {
-  if (!task.dueAt || !task.reminder) {
-    log?.warn(`[task-manager] scheduleCron: skipped task ${task.id} — missing dueAt or reminder`);
-    return undefined;
-  }
-
-  const message = buildReminderPrompt(task);
-  log?.info(
-    `[task-manager] scheduleCron: creating cron for task ${task.id} "${task.title}" at ${task.dueAt} action=${task.reminder.action}`,
-  );
-  log?.info(`[task-manager] scheduleCron: prompt for task ${task.id}:\n${message}`);
-
-  const job = await cron.add({
-    name: `reminder:${task.id}`,
-    description: `Task reminder: ${task.title}`,
-    enabled: true,
-    deleteAfterRun: true,
-    schedule: { kind: "at", at: task.dueAt },
-    sessionTarget: "isolated",
-    wakeMode: "now",
-    agentId: task.assignee,
-    payload: {
-      kind: "agentTurn",
-      message,
-      timeoutSeconds: 120,
-    },
-  });
-
-  const jobId = (job as { id: string }).id;
-  log?.info(`[task-manager] scheduleCron: created cron job ${jobId} for task ${task.id}`);
-  return jobId;
-}
-
-async function removeCronForTask(task: Task, cron: { remove: Function }): Promise<void> {
-  if (task.reminder?.cronJobId) {
-    log?.info(
-      `[task-manager] removeCron: removing cron job ${task.reminder.cronJobId} for task ${task.id}`,
-    );
-    try {
-      await cron.remove(task.reminder.cronJobId);
-      log?.info(`[task-manager] removeCron: removed cron job ${task.reminder.cronJobId}`);
-    } catch (err) {
-      log?.warn(`[task-manager] removeCron: failed to remove ${task.reminder.cronJobId}: ${err}`);
+  try {
+    if (action === "message") {
+      log?.info(`[task-manager] delivering SMS for task ${task.id} to ${phone}`);
+      const payload: Record<string, string> = { to: phone, body };
+      if (fromPhone) payload.from_number = fromPhone;
+      const resp = await fetch(`${sidecarUrl}/actions/send-sms`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await resp.json()) as { ok?: boolean };
+      if (data.ok) {
+        log?.info(`[task-manager] SMS delivered for task ${task.id}`);
+        return { ok: true };
+      }
+      return { ok: false, error: `sidecar returned: ${JSON.stringify(data)}` };
     }
+
+    if (action === "call") {
+      log?.info(`[task-manager] initiating call for task ${task.id} to ${phone}`);
+      const callPayload: Record<string, string> = { to: phone, purpose: body };
+      if (fromPhone) callPayload.from_number = fromPhone;
+      const resp = await fetch(`${sidecarUrl}/actions/make-call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(callPayload),
+      });
+      const data = (await resp.json()) as { ok?: boolean };
+      if (data.ok) {
+        log?.info(`[task-manager] call initiated for task ${task.id}`);
+        return { ok: true };
+      }
+      return { ok: false, error: `sidecar returned: ${JSON.stringify(data)}` };
+    }
+
+    return { ok: false, error: `unknown action: ${action}` };
+  } catch (err) {
+    return { ok: false, error: String(err) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------------
 
 function getTasksDir(): string {
   const workspaceDir =
@@ -147,6 +123,24 @@ export default {
   register(api: OpenClawPluginApi) {
     log = api.logger as any;
 
+    // Capture plugin config
+    const cfg = (api.pluginConfig ?? {}) as {
+      ownerPhone?: string;
+      sidecarUrl?: string;
+      fromPhone?: string;
+    };
+    ownerPhone = cfg.ownerPhone || process.env.OWNER_PHONE_NUMBER || undefined;
+    fromPhone = cfg.fromPhone || process.env.TWILIO_PHONE_NUMBER || undefined;
+    if (cfg.sidecarUrl) sidecarUrl = cfg.sidecarUrl;
+    else if (process.env.SIDECAR_URL) sidecarUrl = process.env.SIDECAR_URL;
+
+    if (ownerPhone) {
+      log?.info(`[task-manager] ownerPhone configured: ${ownerPhone}`);
+    } else {
+      log?.warn("[task-manager] ownerPhone not configured — reminders will fail until set");
+    }
+    log?.info(`[task-manager] sidecarUrl: ${sidecarUrl}`);
+
     // ========================================================================
     // Tools
     // ========================================================================
@@ -180,19 +174,17 @@ export default {
             },
             reminder: {
               type: "object",
-              description:
-                "Set a proactive reminder — the assigned agent will call or message the user at dueAt.",
+              description: "Set a proactive reminder — the system will call or text at dueAt.",
               properties: {
                 action: {
                   type: "string",
                   enum: ["call", "message"],
-                  description:
-                    "How to remind: 'call' for voice call, 'message' for text/channel message",
+                  description: "How to remind: 'call' for voice call, 'message' for SMS text",
                 },
-                channel: {
+                to: {
                   type: "string",
                   description:
-                    "Channel to use (e.g. 'twilio-sms', 'whatsapp'). Agent picks if omitted.",
+                    "Phone number to contact in E.164 format (e.g. +15551234567). Defaults to the owner's number if omitted.",
                 },
                 note: { type: "string", description: "Extra context for the reminder delivery" },
               },
@@ -208,7 +200,7 @@ export default {
             dueDate?: string;
             dueAt?: string;
             assignee?: string;
-            reminder?: { action: "call" | "message"; channel?: string; note?: string };
+            reminder?: { action: "call" | "message"; to?: string; note?: string };
           };
 
           const now = new Date().toISOString();
@@ -221,7 +213,7 @@ export default {
             dueAt,
             assignee,
             reminder: reminder
-              ? { action: reminder.action, channel: reminder.channel, note: reminder.note }
+              ? { action: reminder.action, to: reminder.to, note: reminder.note }
               : undefined,
             createdAt: now,
             updatedAt: now,
@@ -235,36 +227,6 @@ export default {
           if (dueDate) text += ` — due ${dueDate}`;
           if (dueAt && reminder) {
             text += ` — reminder: ${reminder.action} at ${dueAt}`;
-            log?.info(
-              `[task-manager] task_add tool: task ${task.id} has reminder, cronServiceRef=${cronServiceRef ? "available" : "null"}`,
-            );
-            if (!cronServiceRef) {
-              text += " (cron job will be scheduled shortly by the service)";
-              log?.warn(
-                `[task-manager] task_add tool: cronServiceRef is null, deferring to service interval`,
-              );
-            }
-          }
-
-          // Try to schedule cron immediately if ref is available
-          if (dueAt && reminder && cronServiceRef) {
-            try {
-              log?.info(`[task-manager] task_add tool: scheduling cron for task ${task.id}`);
-              const cronJobId = await scheduleCronForTask(task, cronServiceRef);
-              if (cronJobId) {
-                task.reminder!.cronJobId = cronJobId;
-                await saveTasks(store);
-                text += ` [cron: ${cronJobId}]`;
-                log?.info(
-                  `[task-manager] task_add tool: cron ${cronJobId} scheduled for task ${task.id}`,
-                );
-              }
-            } catch (err) {
-              log?.error(
-                `[task-manager] task_add tool: failed to schedule cron for task ${task.id}: ${err}`,
-              );
-              // Service interval will pick it up
-            }
           }
 
           return {
@@ -322,7 +284,10 @@ export default {
               t.status === "archived" ? "[archived]" : t.status === "done" ? "[x]" : "[ ]";
             let line = `- ${check} ${t.title} (${t.id})`;
             if (t.dueDate) line += ` — due ${t.dueDate}`;
-            if (t.dueAt && t.reminder) line += ` — reminder: ${t.reminder.action} at ${t.dueAt}`;
+            if (t.dueAt && t.reminder) {
+              line += ` — reminder: ${t.reminder.action} at ${t.dueAt}`;
+              if (t.reminder.delivered) line += " (delivered)";
+            }
             if (t.completedAt) line += ` — completed ${t.completedAt}`;
             if (t.notes) line += `\n  ${t.notes}`;
             return line;
@@ -349,7 +314,7 @@ export default {
         description:
           "Update a task — change its title, notes, due date, reminder, or mark it as done/open/archived. " +
           "Use when the user asks to complete, finish, reopen, archive, or edit a task. " +
-          "Marking a task 'done' automatically records a completedAt timestamp and removes any pending reminder. " +
+          "Marking a task 'done' automatically records a completedAt timestamp. " +
           "Reopening to 'open' clears it. Archiving preserves completedAt.",
         parameters: {
           type: "object",
@@ -365,15 +330,17 @@ export default {
             assignee: { type: "string", description: "Agent ID to assign this task to" },
             reminder: {
               type: "object",
-              description:
-                "Update or set a reminder. Omit to leave unchanged. Set action to empty string to clear.",
+              description: "Update or set a reminder. Omit to leave unchanged.",
               properties: {
                 action: {
                   type: "string",
                   enum: ["call", "message"],
                   description: "How to remind",
                 },
-                channel: { type: "string", description: "Channel to use" },
+                to: {
+                  type: "string",
+                  description: "Phone number in E.164 format. Defaults to owner's number.",
+                },
                 note: { type: "string", description: "Extra context" },
               },
               required: ["action"],
@@ -394,7 +361,7 @@ export default {
             dueDate?: string;
             dueAt?: string;
             assignee?: string;
-            reminder?: { action: "call" | "message"; channel?: string; note?: string };
+            reminder?: { action: "call" | "message"; to?: string; note?: string };
             status?: "open" | "done" | "archived";
           };
 
@@ -407,9 +374,6 @@ export default {
             };
           }
 
-          const needsReschedule =
-            (dueAt !== undefined && dueAt !== task.dueAt) || reminder !== undefined;
-
           if (title !== undefined) task.title = title;
           if (notes !== undefined) task.notes = notes;
           if (dueDate !== undefined) task.dueDate = dueDate;
@@ -418,10 +382,13 @@ export default {
           if (reminder !== undefined) {
             task.reminder = {
               action: reminder.action,
-              channel: reminder.channel,
+              to: reminder.to,
               note: reminder.note,
-              cronJobId: task.reminder?.cronJobId,
             };
+          }
+          // If dueAt or reminder changed, reset delivered flag so it re-fires
+          if (dueAt !== undefined || reminder !== undefined) {
+            if (task.reminder) task.reminder.delivered = undefined;
           }
           if (status !== undefined) {
             const prevStatus = task.status;
@@ -434,54 +401,16 @@ export default {
           }
           task.updatedAt = new Date().toISOString();
 
-          // Handle cron rescheduling if cronServiceRef is available
-          log?.info(
-            `[task-manager] task_update tool: task ${task.id} status=${task.status} needsReschedule=${needsReschedule} cronServiceRef=${cronServiceRef ? "available" : "null"}`,
-          );
-          if (cronServiceRef) {
-            const shouldRemoveCron = status === "done" || status === "archived" || needsReschedule;
-
-            if (shouldRemoveCron) {
-              log?.info(
-                `[task-manager] task_update tool: removing cron for task ${task.id} (status=${status}, needsReschedule=${needsReschedule})`,
-              );
-              await removeCronForTask(task, cronServiceRef);
-              if (task.reminder) task.reminder.cronJobId = undefined;
-            }
-
-            // Reschedule if task is still open with a reminder
-            if (task.status === "open" && task.dueAt && task.reminder && needsReschedule) {
-              log?.info(
-                `[task-manager] task_update tool: rescheduling cron for task ${task.id} at ${task.dueAt}`,
-              );
-              try {
-                const cronJobId = await scheduleCronForTask(task, cronServiceRef);
-                if (cronJobId && task.reminder) {
-                  task.reminder.cronJobId = cronJobId;
-                  log?.info(
-                    `[task-manager] task_update tool: rescheduled cron ${cronJobId} for task ${task.id}`,
-                  );
-                }
-              } catch (err) {
-                log?.error(
-                  `[task-manager] task_update tool: failed to reschedule cron for task ${task.id}: ${err}`,
-                );
-              }
-            }
-          } else {
-            log?.warn(
-              `[task-manager] task_update tool: cronServiceRef is null, cron changes deferred to sync interval`,
-            );
-          }
-
           await saveTasks(store);
 
           const check =
             task.status === "archived" ? "[archived]" : task.status === "done" ? "[x]" : "[ ]";
           let text = `Task updated: ${check} "${task.title}" (${task.id})`;
           if (task.dueDate) text += ` — due ${task.dueDate}`;
-          if (task.dueAt && task.reminder)
+          if (task.dueAt && task.reminder) {
             text += ` — reminder: ${task.reminder.action} at ${task.dueAt}`;
+            if (task.reminder.delivered) text += " (delivered)";
+          }
           if (task.completedAt) text += ` — completed ${task.completedAt}`;
 
           return {
@@ -534,20 +463,8 @@ export default {
     // Gateway methods (Control UI)
     // ========================================================================
 
-    api.registerGatewayMethod("tasks.list", async ({ params, respond, context }) => {
+    api.registerGatewayMethod("tasks.list", async ({ params, respond }) => {
       try {
-        const hadRef = !!cronServiceRef;
-        if (!cronServiceRef && context?.cron) {
-          cronServiceRef = context.cron as any;
-          log?.info(
-            `[task-manager] tasks.list: captured cronServiceRef from context.cron (was null)`,
-          );
-        }
-        if (!hadRef && cronServiceRef) {
-          log?.info(
-            `[task-manager] tasks.list: cronServiceRef is now available — sync interval can schedule cron jobs`,
-          );
-        }
         const status =
           typeof params?.status === "string"
             ? (params.status as "open" | "done" | "archived" | "all" | "everything")
@@ -567,12 +484,8 @@ export default {
       }
     });
 
-    api.registerGatewayMethod("tasks.add", async ({ params, respond, context }) => {
+    api.registerGatewayMethod("tasks.add", async ({ params, respond }) => {
       try {
-        if (!cronServiceRef && context?.cron) {
-          cronServiceRef = context.cron as any;
-          log?.info(`[task-manager] tasks.add: captured cronServiceRef`);
-        }
         const title = typeof params?.title === "string" ? params.title.trim() : "";
         if (!title) {
           respond(false, { error: "Title is required." });
@@ -583,15 +496,15 @@ export default {
         const dueAt = typeof params?.dueAt === "string" ? params.dueAt.trim() : undefined;
         const assignee = typeof params?.assignee === "string" ? params.assignee.trim() : undefined;
         const reminderParam = params?.reminder as
-          | { action?: string; channel?: string; note?: string }
+          | { action?: string; to?: string; note?: string }
           | undefined;
         const reminder: TaskReminder | undefined =
           reminderParam?.action === "call" || reminderParam?.action === "message"
             ? {
                 action: reminderParam.action,
-                channel:
-                  typeof reminderParam.channel === "string"
-                    ? reminderParam.channel.trim() || undefined
+                to:
+                  typeof reminderParam.to === "string"
+                    ? reminderParam.to.trim() || undefined
                     : undefined,
                 note:
                   typeof reminderParam.note === "string"
@@ -615,29 +528,6 @@ export default {
         };
         const store = await loadTasks();
         store.tasks.push(task);
-
-        // Schedule cron job if reminder is set
-        if (dueAt && reminder) {
-          log?.info(
-            `[task-manager] tasks.add gateway: task ${task.id} has reminder, context.cron=${context?.cron ? "available" : "null"}`,
-          );
-          if (context?.cron) {
-            try {
-              const cronJobId = await scheduleCronForTask(task, context.cron as any);
-              if (cronJobId && task.reminder) {
-                task.reminder.cronJobId = cronJobId;
-                log?.info(
-                  `[task-manager] tasks.add gateway: cron ${cronJobId} scheduled for task ${task.id}`,
-                );
-              }
-            } catch (err) {
-              log?.error(
-                `[task-manager] tasks.add gateway: failed to schedule cron for task ${task.id}: ${err}`,
-              );
-            }
-          }
-        }
-
         await saveTasks(store);
         respond(true, { task });
       } catch (err) {
@@ -645,12 +535,8 @@ export default {
       }
     });
 
-    api.registerGatewayMethod("tasks.update", async ({ params, respond, context }) => {
+    api.registerGatewayMethod("tasks.update", async ({ params, respond }) => {
       try {
-        if (!cronServiceRef && context?.cron) {
-          cronServiceRef = context.cron as any;
-          log?.info(`[task-manager] tasks.update: captured cronServiceRef`);
-        }
         const id = typeof params?.id === "string" ? params.id : "";
         if (!id) {
           respond(false, { error: "Task ID is required." });
@@ -663,38 +549,40 @@ export default {
           return;
         }
 
-        const newDueAt =
-          typeof params?.dueAt === "string" ? params.dueAt.trim() || undefined : undefined;
-        const newAssignee =
-          typeof params?.assignee === "string" ? params.assignee.trim() || undefined : undefined;
         const reminderParam = params?.reminder as
-          | { action?: string; channel?: string; note?: string }
+          | { action?: string; to?: string; note?: string }
           | undefined;
         const newReminder: TaskReminder | undefined =
           reminderParam?.action === "call" || reminderParam?.action === "message"
             ? {
                 action: reminderParam.action,
-                channel:
-                  typeof reminderParam.channel === "string"
-                    ? reminderParam.channel.trim() || undefined
+                to:
+                  typeof reminderParam.to === "string"
+                    ? reminderParam.to.trim() || undefined
                     : undefined,
                 note:
                   typeof reminderParam.note === "string"
                     ? reminderParam.note.trim() || undefined
                     : undefined,
-                cronJobId: task.reminder?.cronJobId,
               }
             : undefined;
-
-        const needsReschedule =
-          (params?.dueAt !== undefined && newDueAt !== task.dueAt) || reminderParam !== undefined;
 
         if (typeof params?.title === "string") task.title = params.title.trim();
         if (typeof params?.notes === "string") task.notes = params.notes.trim() || undefined;
         if (typeof params?.dueDate === "string") task.dueDate = params.dueDate.trim() || undefined;
-        if (params?.dueAt !== undefined) task.dueAt = newDueAt;
-        if (params?.assignee !== undefined) task.assignee = newAssignee;
+        if (params?.dueAt !== undefined) {
+          task.dueAt =
+            typeof params.dueAt === "string" ? params.dueAt.trim() || undefined : undefined;
+        }
+        if (params?.assignee !== undefined) {
+          task.assignee =
+            typeof params.assignee === "string" ? params.assignee.trim() || undefined : undefined;
+        }
         if (newReminder !== undefined) task.reminder = newReminder;
+        // Reset delivered flag when dueAt or reminder changes
+        if ((params?.dueAt !== undefined || newReminder !== undefined) && task.reminder) {
+          task.reminder.delivered = undefined;
+        }
         if (
           params?.status === "open" ||
           params?.status === "done" ||
@@ -710,42 +598,6 @@ export default {
         }
         task.updatedAt = new Date().toISOString();
 
-        // Handle cron rescheduling
-        const cron = context?.cron as any;
-        if (cron) {
-          const shouldRemoveCron =
-            task.status === "done" || task.status === "archived" || needsReschedule;
-
-          if (shouldRemoveCron) {
-            log?.info(
-              `[task-manager] tasks.update: removing cron for task ${task.id} (status=${task.status}, needsReschedule=${needsReschedule})`,
-            );
-            await removeCronForTask(task, cron);
-            if (task.reminder) task.reminder.cronJobId = undefined;
-          }
-
-          if (task.status === "open" && task.dueAt && task.reminder && needsReschedule) {
-            log?.info(
-              `[task-manager] tasks.update: rescheduling cron for task ${task.id} at ${task.dueAt}`,
-            );
-            try {
-              const cronJobId = await scheduleCronForTask(task, cron);
-              if (cronJobId && task.reminder) {
-                task.reminder.cronJobId = cronJobId;
-                log?.info(
-                  `[task-manager] tasks.update: rescheduled cron ${cronJobId} for task ${task.id}`,
-                );
-              }
-            } catch (err) {
-              log?.error(
-                `[task-manager] tasks.update: failed to reschedule cron for task ${task.id}: ${err}`,
-              );
-            }
-          }
-        } else {
-          log?.warn(`[task-manager] tasks.update: context.cron not available for task ${task.id}`);
-        }
-
         await saveTasks(store);
         respond(true, { task });
       } catch (err) {
@@ -753,12 +605,8 @@ export default {
       }
     });
 
-    api.registerGatewayMethod("tasks.remove", async ({ params, respond, context }) => {
+    api.registerGatewayMethod("tasks.remove", async ({ params, respond }) => {
       try {
-        if (!cronServiceRef && context?.cron) {
-          cronServiceRef = context.cron as any;
-          log?.info(`[task-manager] tasks.remove: captured cronServiceRef`);
-        }
         const id = typeof params?.id === "string" ? params.id : "";
         if (!id) {
           respond(false, { error: "Task ID is required." });
@@ -771,14 +619,6 @@ export default {
           return;
         }
         const [removed] = store.tasks.splice(idx, 1);
-
-        // Clean up cron job
-        const cron = context?.cron as any;
-        if (cron && removed.reminder?.cronJobId) {
-          log?.info(`[task-manager] tasks.remove: cleaning up cron for removed task ${removed.id}`);
-          await removeCronForTask(removed, cron);
-        }
-
         await saveTasks(store);
         respond(true, { id, title: removed.title });
       } catch (err) {
@@ -786,11 +626,7 @@ export default {
       }
     });
 
-    api.registerGatewayMethod("tasks.archiveDone", async ({ respond, context }) => {
-      if (!cronServiceRef && context?.cron) {
-        cronServiceRef = context.cron as any;
-        log?.info(`[task-manager] tasks.archiveDone: captured cronServiceRef`);
-      }
+    api.registerGatewayMethod("tasks.archiveDone", async ({ respond }) => {
       try {
         const store = await loadTasks();
         const now = new Date().toISOString();
@@ -810,7 +646,7 @@ export default {
     });
 
     // ========================================================================
-    // Service (captures workspaceDir at startup)
+    // Service (reminder delivery loop)
     // ========================================================================
 
     api.registerService({
@@ -823,54 +659,64 @@ export default {
           ctx.logger.warn("task-manager: no workspaceDir from service context, using fallback");
         }
         await ensureTasksDir();
-        ctx.logger.info(
-          "task-manager: service started, cronServiceRef will be populated on first gateway method call (e.g. tasks.list from UI connect)",
-        );
 
-        // Cron sync interval — picks up tasks with reminder + dueAt but no cronJobId
-        // Runs every 5s so tasks created via agent tools get scheduled quickly
-        const syncInterval = setInterval(async () => {
-          if (!cronServiceRef) {
-            // Don't log every 5s — only on first check
-            return;
-          }
+        // Reminder delivery loop — checks every 5s for due reminders and delivers them
+        // deterministically via the Twilio sidecar (no LLM involved).
+        const deliveryInterval = setInterval(async () => {
           try {
             const store = await loadTasks();
             let dirty = false;
+            const now = Date.now();
+
             for (const task of store.tasks) {
               if (
                 task.status === "open" &&
                 task.dueAt &&
                 task.reminder &&
-                !task.reminder.cronJobId
+                !task.reminder.delivered
               ) {
-                ctx.logger.info(
-                  `task-manager: sync interval found unscheduled task ${task.id} "${task.title}" — scheduling cron`,
-                );
-                try {
-                  const cronJobId = await scheduleCronForTask(task, cronServiceRef!);
-                  if (cronJobId) {
-                    task.reminder.cronJobId = cronJobId;
+                const dueMs = new Date(task.dueAt).getTime();
+                if (now >= dueMs) {
+                  const attempts = (task.reminder as any)._attempts ?? 0;
+                  if (attempts >= MAX_DELIVERY_ATTEMPTS) {
+                    task.reminder.delivered = true;
+                    task.reminder.deliveryError = `failed after ${attempts} attempts`;
+                    task.updatedAt = new Date().toISOString();
                     dirty = true;
-                    ctx.logger.info(
-                      `task-manager: sync interval scheduled cron ${cronJobId} for task ${task.id}`,
+                    ctx.logger.error(
+                      `task-manager: giving up on task ${task.id} after ${attempts} attempts`,
+                    );
+                    continue;
+                  }
+
+                  ctx.logger.info(
+                    `task-manager: reminder due for task ${task.id} "${task.title}" — delivering ${task.reminder.action} (attempt ${attempts + 1}/${MAX_DELIVERY_ATTEMPTS})`,
+                  );
+                  const result = await deliverReminder(task);
+                  if (result.ok) {
+                    task.reminder.delivered = true;
+                    task.reminder.deliveryError = undefined;
+                    task.updatedAt = new Date().toISOString();
+                    dirty = true;
+                    ctx.logger.info(`task-manager: reminder delivered for task ${task.id}`);
+                  } else {
+                    (task.reminder as any)._attempts = attempts + 1;
+                    dirty = true;
+                    ctx.logger.error(
+                      `task-manager: delivery failed for task ${task.id} (attempt ${attempts + 1}): ${result.error}`,
                     );
                   }
-                } catch (err) {
-                  ctx.logger.warn(
-                    `task-manager: sync interval failed to schedule cron for task ${task.id}: ${err}`,
-                  );
                 }
               }
             }
+
             if (dirty) await saveTasks(store);
           } catch (err) {
-            ctx.logger.warn(`task-manager: sync interval error: ${err}`);
+            ctx.logger.warn(`task-manager: delivery interval error: ${err}`);
           }
         }, 5_000);
 
-        // Clean up on process exit
-        const cleanup = () => clearInterval(syncInterval);
+        const cleanup = () => clearInterval(deliveryInterval);
         process.once("SIGTERM", cleanup);
         process.once("SIGINT", cleanup);
       },

@@ -14,6 +14,7 @@ session can be configured when the callee answers.
 
 import logging
 import uuid
+from urllib.parse import urlencode
 
 import httpx
 
@@ -29,6 +30,7 @@ _outbound_calls: dict[str, dict] = {}
 async def make_call(
     to: str,
     purpose: str = "",
+    from_number: str | None = None,
 ) -> dict:
     """Initiate an outbound voice call.
 
@@ -65,7 +67,7 @@ async def make_call(
         if proxy_url:
             result = await _call_via_proxy(proxy_url, to, callback_url)
         else:
-            result = await _call_via_twilio(settings, to, callback_url)
+            result = await _call_via_twilio(settings, to, callback_url, from_number)
 
         result["session_id"] = session_id
         return result
@@ -102,6 +104,7 @@ async def _call_via_twilio(
     settings,
     to: str,
     callback_url: str,
+    from_number: str | None = None,
 ) -> dict:
     """Initiate call directly via the Twilio REST API."""
     if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
@@ -110,7 +113,7 @@ async def _call_via_twilio(
             "(TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN) are configured."
         )
 
-    sender = settings.TWILIO_FROM_NUMBER
+    sender = from_number or settings.TWILIO_FROM_NUMBER
     if not sender:
         raise ValueError(
             "No sender number: set TWILIO_FROM_NUMBER for direct Twilio calls."
@@ -126,11 +129,13 @@ async def _call_via_twilio(
         url, to, sender, callback_url,
     )
 
+    form_data = [("To", to), ("From", sender), ("Url", callback_url)]
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             url,
-            data={"To": to, "From": sender, "Url": callback_url},
-            auth=(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
+            content=urlencode(form_data).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            auth=httpx.BasicAuth(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
         )
         logger.info(
             "Outbound call (direct): response status=%d body=%s",

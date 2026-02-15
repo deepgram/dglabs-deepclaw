@@ -1,8 +1,12 @@
 export interface TaskReminder {
   action: "call" | "message";
-  channel?: string;
+  /** Recipient phone number in E.164 format. Falls back to ownerPhone from plugin config. */
+  to?: string;
   note?: string;
-  cronJobId?: string;
+  /** Set to true after delivery succeeds (or permanently fails). */
+  delivered?: boolean;
+  /** Error message if delivery failed permanently. */
+  deliveryError?: string;
 }
 
 export interface Task {

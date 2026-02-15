@@ -160,3 +160,7 @@ for i in $(seq 1 10); do
   fi
   sleep 1
 done
+
+echo ""
+echo "Tailing sidecar logs (Ctrl-C to stop)..."
+tail -f /tmp/deepclaw-sidecar.log
