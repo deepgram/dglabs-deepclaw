@@ -88,6 +88,16 @@ data/deepclaw/
 data/workspace/memory/
 data/workspace/**/memory/
 data/workspace/MEMORY.md
+data/workspace/USER.md
+data/workspace/CALENDAR.md
+data/workspace/.tasks/
+data/workspace/.pages/
 data/workspace/**/CALLS.md
 data/workspace/**/.git/
 data/workspace/skills/
+data/workspace/*.sh
+data/workspace/*.html
+data/workspace/**/*.md
+
+# Local test scripts
+test_deploy_*.sh

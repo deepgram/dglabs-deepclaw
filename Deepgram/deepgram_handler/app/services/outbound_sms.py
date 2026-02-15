@@ -1,12 +1,15 @@
-"""Outbound SMS service via deepclaw-control proxy.
+"""Outbound SMS service.
 
-When sharpclaw is managed by deepclaw-control, the control plane injects
-``TWILIO_PROXY_URL`` at provisioning time.  This module POSTs outbound
-messages to ``{TWILIO_PROXY_URL}/api/sms/send`` so the control plane can
-handle the actual Twilio API call.
+Supports two modes:
+1. **Control plane proxy** — when ``TWILIO_PROXY_URL`` is set, POSTs to the
+   deepclaw-control proxy at ``{TWILIO_PROXY_URL}/api/sms/send``.
+2. **Direct Twilio API** — when ``TWILIO_PROXY_URL`` is empty, calls the
+   Twilio REST API directly using ``TWILIO_ACCOUNT_SID``,
+   ``TWILIO_AUTH_TOKEN``, and ``TWILIO_FROM_NUMBER``.
 """
 
 import logging
+from urllib.parse import urlencode
 
 import httpx
 
@@ -21,7 +24,7 @@ async def send_sms(
     from_number: str | None = None,
     media_urls: list[str] | None = None,
 ) -> dict:
-    """Send an outbound SMS through the deepclaw-control proxy.
+    """Send an outbound SMS.
 
     Parameters
     ----------
@@ -30,45 +33,106 @@ async def send_sms(
     text:
         Message body (optional when *media_urls* is provided).
     from_number:
-        E.164 sender number.  When ``None`` the control plane picks a default.
+        E.164 sender number.  Falls back to ``TWILIO_FROM_NUMBER`` in
+        direct mode or control plane default in proxy mode.
     media_urls:
         Optional list of publicly-reachable media URLs to attach as MMS.
 
     Returns
     -------
     dict
-        JSON response from the control plane, typically ``{"sid": ..., "status": ...}``.
+        JSON response with at least ``{"sid": ..., "status": ...}``.
 
     Raises
     ------
     ValueError
-        If ``TWILIO_PROXY_URL`` is empty or not configured.
+        If neither proxy nor direct Twilio credentials are configured.
     httpx.HTTPStatusError
-        If the control plane returns a non-2xx status code.
+        On non-2xx responses from the upstream API.
     """
     settings = get_settings()
     proxy_url = settings.TWILIO_PROXY_URL
 
-    if not proxy_url:
-        raise ValueError(
-            "TWILIO_PROXY_URL is not configured. "
-            "Set the environment variable to the deepclaw-control base URL."
-        )
+    if proxy_url:
+        return await _send_via_proxy(proxy_url, to, text, from_number, media_urls)
 
+    return await _send_via_twilio(settings, to, text, from_number, media_urls)
+
+
+async def _send_via_proxy(
+    proxy_url: str,
+    to: str,
+    text: str | None,
+    from_number: str | None,
+    media_urls: list[str] | None,
+) -> dict:
+    """Send SMS through the deepclaw-control proxy."""
     url = f"{proxy_url}/api/sms/send"
     payload: dict = {"to": to, "text": text, "from": from_number}
     if media_urls is not None:
         payload["mediaUrls"] = media_urls
 
     logger.info(
-        "Outbound SMS: POST %s to=%s text_len=%d from=%s",
+        "Outbound SMS (proxy): POST %s to=%s text_len=%d from=%s",
         url, to, len(text or ""), from_number or "default",
     )
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, json=payload)
         logger.info(
-            "Outbound SMS: response status=%d body=%s",
+            "Outbound SMS (proxy): response status=%d body=%s",
+            resp.status_code, resp.text[:300],
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _send_via_twilio(
+    settings,
+    to: str,
+    text: str | None,
+    from_number: str | None,
+    media_urls: list[str] | None,
+) -> dict:
+    """Send SMS directly via the Twilio REST API."""
+    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        raise ValueError(
+            "Neither TWILIO_PROXY_URL nor direct Twilio credentials "
+            "(TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN) are configured."
+        )
+
+    sender = from_number or settings.TWILIO_FROM_NUMBER
+    if not sender:
+        raise ValueError(
+            "No sender number: set TWILIO_FROM_NUMBER or pass from_number."
+        )
+
+    url = (
+        f"https://api.twilio.com/2010-04-01"
+        f"/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json"
+    )
+    # Twilio accepts repeated MediaUrl keys, so use a list of tuples.
+    form_data: list[tuple[str, str]] = [("To", to), ("From", sender)]
+    if text:
+        form_data.append(("Body", text))
+    if media_urls:
+        for media_url in media_urls:
+            form_data.append(("MediaUrl", media_url))
+
+    logger.info(
+        "Outbound SMS (direct): POST %s to=%s text_len=%d from=%s",
+        url, to, len(text or ""), sender,
+    )
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            content=urlencode(form_data).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            auth=httpx.BasicAuth(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
+        )
+        logger.info(
+            "Outbound SMS (direct): response status=%d body=%s",
             resp.status_code, resp.text[:300],
         )
         resp.raise_for_status()

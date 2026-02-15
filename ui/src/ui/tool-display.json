@@ -138,6 +138,26 @@
         }
       }
     },
+    "task_add": {
+      "icon": "check",
+      "title": "Task Add",
+      "detailKeys": ["title"]
+    },
+    "task_list": {
+      "icon": "check",
+      "title": "Task List",
+      "detailKeys": ["status"]
+    },
+    "task_update": {
+      "icon": "check",
+      "title": "Task Update",
+      "detailKeys": ["id", "status"]
+    },
+    "task_remove": {
+      "icon": "check",
+      "title": "Task Remove",
+      "detailKeys": ["id"]
+    },
     "cron": {
       "icon": "loader",
       "title": "Cron",
