@@ -25,6 +25,7 @@ class SendSmsRequest(BaseModel):
 class MakeCallRequest(BaseModel):
     to: str
     purpose: str
+    from_number: str | None = None
 
 
 @router.post("/send-sms")
@@ -47,14 +48,14 @@ async def action_send_sms(req: SendSmsRequest):
         return JSONResponse(status_code=503, content={"ok": False, "error": str(e)})
     except httpx.HTTPStatusError as e:
         logger.error(
-            "Action send-sms: control plane error: status=%d url=%s body=%s",
+            "Action send-sms: upstream error: status=%d url=%s body=%s",
             e.response.status_code,
             e.request.url,
             e.response.text[:300],
         )
         return JSONResponse(
             status_code=502,
-            content={"ok": False, "error": f"Control plane returned {e.response.status_code}"},
+            content={"ok": False, "error": f"Upstream returned {e.response.status_code}"},
         )
     except Exception:
         logger.exception("Action send-sms: unexpected error")
@@ -68,19 +69,24 @@ async def action_send_sms(req: SendSmsRequest):
 async def action_make_call(req: MakeCallRequest):
     """Initiate an outbound phone call. Called by the OpenClaw agent via curl."""
     try:
-        result = await make_call(to=req.to, purpose=req.purpose)
+        result = await make_call(to=req.to, purpose=req.purpose, from_number=req.from_number)
         return {"ok": True, **result}
     except ValueError as e:
-        logger.error("Call config error: %s", e)
+        logger.error("Action make-call: config error: %s", e)
         return JSONResponse(status_code=503, content={"ok": False, "error": str(e)})
     except httpx.HTTPStatusError as e:
-        logger.error("Call control plane error: %s", e)
+        logger.error(
+            "Action make-call: upstream error: status=%d url=%s body=%s",
+            e.response.status_code,
+            e.request.url,
+            e.response.text[:300],
+        )
         return JSONResponse(
             status_code=502,
-            content={"ok": False, "error": f"Control plane returned {e.response.status_code}"},
+            content={"ok": False, "error": f"Upstream returned {e.response.status_code}"},
         )
     except Exception:
-        logger.exception("Unexpected error making call")
+        logger.exception("Action make-call: unexpected error")
         return JSONResponse(
             status_code=500,
             content={"ok": False, "error": "Internal error making call"},

@@ -1,0 +1,21 @@
+{
+  "id": "task-manager",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ownerPhone": {
+        "type": "string",
+        "description": "Owner's phone number in E.164 format (e.g. +15551234567) for deterministic SMS/call reminders"
+      },
+      "sidecarUrl": {
+        "type": "string",
+        "description": "Base URL of the Twilio sidecar (default: http://localhost:8000). Use http://host.docker.internal:8000 for local Docker on macOS."
+      },
+      "fromPhone": {
+        "type": "string",
+        "description": "Twilio sender number in E.164 format (the bot's number, e.g. +18608514045). Passed as from_number to the sidecar."
+      }
+    }
+  }
+}

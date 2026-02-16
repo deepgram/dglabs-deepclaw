@@ -12,22 +12,31 @@ logger = logging.getLogger(__name__)
 
 USER_MD_PATH = Path.home() / ".openclaw" / "workspace" / "USER.md"
 
-SMS_FORMAT_RULES = "Keep responses concise and conversational for texting. A few sentences max."
+SMS_FORMAT_RULES = " Keep responses concise and conversational for texting. A few sentences max."
+
+SMS_CHANNEL_CONTEXT = (
+    "IMPORTANT: This message arrived via SMS (Twilio). You are texting with a real person "
+    "on their phone. Do NOT say you're on webchat or check your runtime config — "
+    "the SMS channel is handled by an external sidecar, not a gateway plugin. "
+    "Your replies will be sent back as text messages."
+)
 
 NEW_USER_SMS_PROMPT = (
+    f"{SMS_CHANNEL_CONTEXT} "
     "You're texting with someone for the first time. "
     "You don't have a name yet — if they ask, say you haven't picked one yet. "
     "Within the first exchange, naturally ask their name. "
     "When someone says 'call me [name]' or 'you can call me [name]', "
     "they are telling you their NAME — not asking you to make a phone call. "
-    "If you are asked to text or call, use the twilio action"
+    "If you are asked to text or call, use the twilio action."
     + SMS_FORMAT_RULES
 )
 
 KNOWN_USER_SMS_PROMPT = (
+    f"{SMS_CHANNEL_CONTEXT} "
     "You're in a text conversation. "
     "If a request is ambiguous, ask a quick clarifying question before acting. "
-    "If you are asked to text or call, use the twilio action"
+    "If you are asked to text or call, use the twilio action."
     + SMS_FORMAT_RULES
 )
 

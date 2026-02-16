@@ -3,7 +3,7 @@ import type { AppViewState } from "./app-view-state.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { refreshChatAvatar } from "./app-chat.ts";
-import { DEFAULT_CRON_FORM } from "./app-defaults.ts";
+import { DEFAULT_CRON_FORM, DEFAULT_TASK_FORM } from "./app-defaults.ts";
 import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
@@ -53,6 +53,16 @@ import {
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
+import {
+  loadTasksList,
+  addTask,
+  updateTask,
+  toggleTaskStatus,
+  removeTask,
+  archiveDoneTask,
+  archiveAllDone,
+  taskToForm,
+} from "./controllers/tasks.ts";
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
@@ -80,6 +90,7 @@ import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkills } from "./views/skills.ts";
+import { renderTasks } from "./views/tasks.ts";
 import { renderUsage } from "./views/usage.ts";
 
 const AVATAR_DATA_RE = /^data:/i;
@@ -138,11 +149,13 @@ export function renderApp(state: AppViewState) {
           </button>
           <div class="brand">
             <div class="brand-logo">
-              <img src=${basePath ? `${basePath}/favicon.svg` : "/favicon.svg"} alt="OpenClaw" />
+              <svg viewBox="0 0 600 633" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M279.023 632.667H24.0273C15.4906 632.667 11.2223 622.353 17.2171 616.308L181.476 450.952C183.298 449.129 185.744 448.122 188.286 448.122H280.99C352.64 448.122 413.26 392.043 415.418 320.422C417.624 245.971 357.724 184.76 283.819 184.76H184.497V307.201C184.497 312.478 180.181 316.795 174.905 316.795H9.59173C4.31628 316.795 0 312.478 0 307.201V9.76098C0 4.48415 4.31628 0.166748 9.59173 0.166748H283.819C459.78 0.166748 602.648 144.704 599.963 321.334C597.325 494.845 452.538 632.667 279.023 632.667Z" fill="currentColor"/>
+              </svg>
             </div>
             <div class="brand-text">
-              <div class="brand-title">OPENCLAW</div>
-              <div class="brand-sub">Gateway Dashboard</div>
+              <div class="brand-title">DEEPCLAW</div>
+              <div class="brand-sub">Control</div>
             </div>
           </div>
         </div>
@@ -634,6 +647,58 @@ export function renderApp(state: AppViewState) {
                 onRun: (job) => runCronJob(state, job),
                 onRemove: (job) => removeCronJob(state, job),
                 onLoadRuns: (jobId) => loadCronRuns(state, jobId),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "tasks"
+            ? renderTasks({
+                loading: state.tasksLoading,
+                tasks: state.tasksList,
+                error: state.tasksError,
+                busy: state.tasksBusy,
+                form: state.tasksForm,
+                editingId: state.tasksEditingId,
+                formOpen: state.tasksFormOpen,
+                filter: state.tasksFilter,
+                expandedId: state.tasksExpandedId,
+                onFormChange: (patch) => (state.tasksForm = { ...state.tasksForm, ...patch }),
+                onFilterChange: (filter) => (state.tasksFilter = filter),
+                onRefresh: () => loadTasksList(state),
+                onNewTask: () => {
+                  state.tasksEditingId = null;
+                  state.tasksForm = { ...DEFAULT_TASK_FORM };
+                  state.tasksFormOpen = true;
+                },
+                onAdd: async () => {
+                  await addTask(state);
+                  if (!state.tasksError) {
+                    state.tasksFormOpen = false;
+                  }
+                },
+                onSave: async () => {
+                  await updateTask(state);
+                  if (!state.tasksError) {
+                    state.tasksFormOpen = false;
+                  }
+                },
+                onEdit: (task) => {
+                  state.tasksEditingId = task.id;
+                  state.tasksForm = taskToForm(task);
+                  state.tasksFormOpen = true;
+                },
+                onCancelEdit: () => {
+                  state.tasksEditingId = null;
+                  state.tasksForm = { ...DEFAULT_TASK_FORM };
+                  state.tasksFormOpen = false;
+                },
+                onToggle: (task) =>
+                  toggleTaskStatus(state, task, task.status === "done" ? "open" : "done"),
+                onRemove: (task) => removeTask(state, task),
+                onExpand: (taskId) => (state.tasksExpandedId = taskId),
+                onArchive: (task) => archiveDoneTask(state, task),
+                onArchiveAllDone: () => archiveAllDone(state),
               })
             : nothing
         }

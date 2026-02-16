@@ -196,9 +196,29 @@ export async function onTimer(state: CronServiceState) {
       endedAt: number;
     }> = [];
 
+    if (dueJobs.length > 0) {
+      state.deps.log.info(
+        {
+          count: dueJobs.length,
+          jobIds: dueJobs.map((j) => j.id),
+          jobNames: dueJobs.map((j) => j.job.name),
+        },
+        "cron: firing due jobs",
+      );
+    }
+
     for (const { id, job } of dueJobs) {
       const startedAt = state.deps.nowMs();
       job.state.runningAtMs = startedAt;
+      state.deps.log.info(
+        {
+          jobId: id,
+          jobName: job.name,
+          sessionTarget: job.sessionTarget,
+          payloadKind: job.payload.kind,
+        },
+        "cron: starting job execution",
+      );
       emit(state, { jobId: job.id, action: "started", runAtMs: startedAt });
 
       const jobTimeoutMs =
@@ -217,7 +237,12 @@ export async function onTimer(state: CronServiceState) {
             );
           }),
         ]).finally(() => clearTimeout(timeoutId!));
-        results.push({ jobId: id, ...result, startedAt, endedAt: state.deps.nowMs() });
+        const endedAt = state.deps.nowMs();
+        state.deps.log.info(
+          { jobId: id, jobName: job.name, status: result.status, durationMs: endedAt - startedAt },
+          "cron: job execution complete",
+        );
+        results.push({ jobId: id, ...result, startedAt, endedAt });
       } catch (err) {
         state.deps.log.warn(
           { jobId: id, jobName: job.name, timeoutMs: jobTimeoutMs },
@@ -264,6 +289,10 @@ export async function onTimer(state: CronServiceState) {
           });
 
           if (shouldDelete && state.store) {
+            state.deps.log.info(
+              { jobId: job.id, jobName: job.name },
+              "cron: deleting one-shot job after successful run",
+            );
             state.store.jobs = state.store.jobs.filter((j) => j.id !== job.id);
             emit(state, { jobId: job.id, action: "removed" });
           }
@@ -417,10 +446,30 @@ async function executeJobCore(
     return { status: "skipped", error: "isolated job requires payload.kind=agentTurn" };
   }
 
+  state.deps.log.info(
+    {
+      jobId: job.id,
+      jobName: job.name,
+      agentId: job.agentId,
+      messageLen: job.payload.message?.length,
+    },
+    "cron: running isolated agent job",
+  );
   const res = await state.deps.runIsolatedAgentJob({
     job,
     message: job.payload.message,
   });
+  state.deps.log.info(
+    {
+      jobId: job.id,
+      jobName: job.name,
+      status: res.status,
+      summary: res.summary?.slice(0, 120),
+      sessionId: res.sessionId,
+      error: res.error,
+    },
+    "cron: isolated agent job finished",
+  );
 
   // Post a short summary back to the main session.
   const summaryText = res.summary?.trim();

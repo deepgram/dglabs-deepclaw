@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../config/config.js";
+import type { CronService } from "../cron/service.js";
 import type { PluginRegistry } from "./registry.js";
 import { STATE_DIR } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -13,6 +14,7 @@ export async function startPluginServices(params: {
   registry: PluginRegistry;
   config: OpenClawConfig;
   workspaceDir?: string;
+  cron?: CronService;
 }): Promise<PluginServicesHandle> {
   const running: Array<{
     id: string;
@@ -32,6 +34,7 @@ export async function startPluginServices(params: {
           error: (msg) => log.error(msg),
           debug: (msg) => log.debug(msg),
         },
+        cron: params.cron,
       });
       running.push({
         id: service.id,
@@ -47,6 +50,7 @@ export async function startPluginServices(params: {
                   error: (msg) => log.error(msg),
                   debug: (msg) => log.debug(msg),
                 },
+                cron: params.cron,
               })
           : undefined,
       });

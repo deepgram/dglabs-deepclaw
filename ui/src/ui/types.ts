@@ -773,3 +773,24 @@ export type LogEntry = {
   message?: string | null;
   meta?: Record<string, unknown> | null;
 };
+
+export type TaskReminderItem = {
+  action: "call" | "message";
+  channel?: string;
+  note?: string;
+  cronJobId?: string;
+};
+
+export type TaskItem = {
+  id: string;
+  title: string;
+  status: "open" | "done" | "archived";
+  notes?: string;
+  dueDate?: string;
+  dueAt?: string;
+  assignee?: string;
+  reminder?: TaskReminderItem;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
