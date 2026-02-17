@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routers import actions, openclaw_proxy, proxy, sms, voice
+from app.routers import actions, openclaw_proxy, pages_proxy, proxy, sms, voice
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +28,7 @@ app.add_middleware(
 
 app.include_router(actions.router)
 app.include_router(openclaw_proxy.router)
+app.include_router(pages_proxy.router)
 app.include_router(proxy.router)
 app.include_router(sms.router)
 app.include_router(voice.router)

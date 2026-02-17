@@ -194,7 +194,10 @@ function renderMarkdownBlock(b: MarkdownBlock): string {
 }
 
 function renderHtml(b: HtmlBlock): string {
-  return `<div class="html-content">${b.content}</div>`;
+  // Render inside a sandboxed srcdoc iframe so game/widget CSS cannot
+  // leak into the page shell (header, footer, layout).
+  const srcdoc = b.content.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return `<div class="html-content"><iframe class="html-iframe" srcdoc="${srcdoc}" sandbox="allow-scripts" loading="lazy"></iframe></div>`;
 }
 
 function renderBlock(block: Block): string {
@@ -253,24 +256,24 @@ export function renderPage(page: Page): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#101014">
+  <meta name="theme-color" content="#12141a">
   <title>${esc(page.title)} — DeepClaw</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
-      --bg: #101014;
-      --bg-elevated: #232329;
-      --bg-accent: #1a1a1f;
-      --bg-hover: #2c2c33;
-      --text-strong: #fbfbff;
+      --bg: #12141a;
+      --bg-elevated: #1e2028;
+      --bg-accent: #181a20;
+      --bg-hover: #2a2c34;
+      --text-strong: #fafafa;
       --text: #e1e1e5;
-      --text-muted: #949498;
+      --text-muted: #71717a;
       --text-muted-strong: #4e4e52;
-      --border: #2c2c33;
+      --border: #27272a;
       --border-strong: #4e4e52;
       --accent: #13ef93;
       --accent-hover: #a1f9d4;
@@ -282,7 +285,7 @@ export function renderPage(page: Page): string {
       --radius-sm: 6px;
       --radius-md: 8px;
       --radius-lg: 12px;
-      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+      --font-body: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
       --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
     }
 
@@ -306,38 +309,41 @@ export function renderPage(page: Page): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 1.5rem;
+      gap: 16px;
+      padding: 0 20px;
       background: var(--bg);
       border-bottom: 1px solid var(--border);
     }
     .site-header .brand {
       display: flex;
       align-items: center;
-      gap: 0.6rem;
+      gap: 10px;
       text-decoration: none;
     }
     .site-header .brand-logo {
       width: 28px;
       height: 28px;
+      flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    .site-header .brand-logo svg { width: 24px; height: auto; }
-    .site-header .brand-text { display: flex; flex-direction: column; }
+    .site-header .brand-logo svg { width: 100%; height: 100%; }
+    .site-header .brand-text { display: flex; flex-direction: column; gap: 1px; }
     .site-header .brand-title {
       font-size: 16px;
       font-weight: 700;
       color: var(--text-strong);
-      letter-spacing: 0.04em;
-      line-height: 1.2;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
     }
     .site-header .brand-sub {
       font-size: 10px;
       font-weight: 500;
       color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.05em;
+      line-height: 1;
     }
     .site-header .page-id {
       font-family: var(--font-mono);
@@ -370,15 +376,22 @@ export function renderPage(page: Page): string {
 
     /* --- Footer ---------------------------------------------------------- */
     .site-footer {
-      padding: 1rem 0;
-      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 0;
       border-top: 1px solid var(--border);
       opacity: 0.4;
+      transition: opacity 0.2s ease;
+    }
+    .site-footer:hover {
+      opacity: 0.7;
     }
     .site-footer span {
       font-size: 12px;
       font-weight: 500;
       color: var(--text-muted);
+      letter-spacing: 0.02em;
     }
 
     /* --- Blocks ---------------------------------------------------------- */
@@ -522,6 +535,13 @@ export function renderPage(page: Page): string {
 
     /* --- HTML block ------------------------------------------------------- */
     .html-content { border-radius: var(--radius-md); overflow: hidden; }
+    .html-iframe {
+      width: 100%;
+      min-height: 80vh;
+      border: none;
+      border-radius: var(--radius-md);
+      background: transparent;
+    }
 
     /* --- Misc ------------------------------------------------------------ */
     a { color: var(--accent); }
