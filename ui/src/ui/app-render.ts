@@ -43,7 +43,9 @@ import {
   updateExecApprovalsFormValue,
 } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
+import { loadMemoryFiles, loadMemoryFileContent, saveMemoryFile } from "./controllers/memory.ts";
 import { loadNodes } from "./controllers/nodes.ts";
+import { loadPagesList, deletePage } from "./controllers/pages.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { deleteSession, loadSessions, patchSession } from "./controllers/sessions.ts";
 import {
@@ -86,8 +88,10 @@ import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
 import { renderInstances } from "./views/instances.ts";
 import { renderLogs } from "./views/logs.ts";
+import { renderMemory } from "./views/memory.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
+import { renderPages } from "./views/pages.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkills } from "./views/skills.ts";
 import { renderTasks } from "./views/tasks.ts";
@@ -699,6 +703,51 @@ export function renderApp(state: AppViewState) {
                 onExpand: (taskId) => (state.tasksExpandedId = taskId),
                 onArchive: (task) => archiveDoneTask(state, task),
                 onArchiveAllDone: () => archiveAllDone(state),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "pages"
+            ? renderPages({
+                loading: state.pagesLoading,
+                pages: state.pagesList,
+                error: state.pagesError,
+                busy: state.pagesBusy,
+                baseUrl: state.pagesBaseUrl,
+                onRefresh: () => loadPagesList(state),
+                onDelete: (id) => deletePage(state, id),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "memory"
+            ? renderMemory({
+                loading: state.memoryLoading,
+                error: state.memoryError,
+                filesList: state.memoryFilesList,
+                fileActive: state.memoryFileActive,
+                fileContents: state.memoryFileContents,
+                fileDrafts: state.memoryFileDrafts,
+                saving: state.memorySaving,
+                onRefresh: () => loadMemoryFiles(state),
+                onSelectFile: (name) => {
+                  state.memoryFileActive = name;
+                  void loadMemoryFileContent(state, name);
+                },
+                onFileDraftChange: (name, content) => {
+                  state.memoryFileDrafts = { ...state.memoryFileDrafts, [name]: content };
+                },
+                onFileReset: (name) => {
+                  const base = state.memoryFileContents[name] ?? "";
+                  state.memoryFileDrafts = { ...state.memoryFileDrafts, [name]: base };
+                },
+                onFileSave: (name) => {
+                  const content =
+                    state.memoryFileDrafts[name] ?? state.memoryFileContents[name] ?? "";
+                  void saveMemoryFile(state, name, content);
+                },
               })
             : nothing
         }

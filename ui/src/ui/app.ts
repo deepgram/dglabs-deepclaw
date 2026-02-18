@@ -28,7 +28,7 @@ import type {
   StatusSummary,
   NostrProfile,
 } from "./types.ts";
-import type { TaskItem } from "./types.ts";
+import type { PageItem, TaskItem, MemoryFilesListResult } from "./types.ts";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import {
   handleChannelConfigReload as handleChannelConfigReloadInternal,
@@ -287,6 +287,20 @@ export class OpenClawApp extends LitElement {
 
   // Non-reactive (don’t trigger renders just for timer bookkeeping).
   usageQueryDebounceTimer: number | null = null;
+
+  @state() pagesLoading = false;
+  @state() pagesList: PageItem[] = [];
+  @state() pagesError: string | null = null;
+  @state() pagesBusy = false;
+  @state() pagesBaseUrl: string | null = null;
+
+  @state() memoryLoading = false;
+  @state() memoryError: string | null = null;
+  @state() memoryFilesList: MemoryFilesListResult | null = null;
+  @state() memoryFileContents: Record<string, string> = {};
+  @state() memoryFileDrafts: Record<string, string> = {};
+  @state() memoryFileActive: string | null = null;
+  @state() memorySaving = false;
 
   @state() tasksLoading = false;
   @state() tasksList: TaskItem[] = [];
