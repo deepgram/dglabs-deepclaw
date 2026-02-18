@@ -43,7 +43,9 @@ import {
   updateExecApprovalsFormValue,
 } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
+import { loadMemoryFiles, loadMemoryFileContent, saveMemoryFile } from "./controllers/memory.ts";
 import { loadNodes } from "./controllers/nodes.ts";
+import { loadPagesList, deletePage } from "./controllers/pages.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { deleteSession, loadSessions, patchSession } from "./controllers/sessions.ts";
 import {
@@ -86,8 +88,10 @@ import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
 import { renderInstances } from "./views/instances.ts";
 import { renderLogs } from "./views/logs.ts";
+import { renderMemory } from "./views/memory.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
+import { renderPages } from "./views/pages.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkills } from "./views/skills.ts";
 import { renderTasks } from "./views/tasks.ts";
@@ -149,11 +153,13 @@ export function renderApp(state: AppViewState) {
           </button>
           <div class="brand">
             <div class="brand-logo">
-              <img src=${basePath ? `${basePath}/favicon.svg` : "/favicon.svg"} alt="OpenClaw" />
+              <svg viewBox="0 0 600 633" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M279.023 632.667H24.0273C15.4906 632.667 11.2223 622.353 17.2171 616.308L181.476 450.952C183.298 449.129 185.744 448.122 188.286 448.122H280.99C352.64 448.122 413.26 392.043 415.418 320.422C417.624 245.971 357.724 184.76 283.819 184.76H184.497V307.201C184.497 312.478 180.181 316.795 174.905 316.795H9.59173C4.31628 316.795 0 312.478 0 307.201V9.76098C0 4.48415 4.31628 0.166748 9.59173 0.166748H283.819C459.78 0.166748 602.648 144.704 599.963 321.334C597.325 494.845 452.538 632.667 279.023 632.667Z" fill="currentColor"/>
+              </svg>
             </div>
             <div class="brand-text">
-              <div class="brand-title">OPENCLAW</div>
-              <div class="brand-sub">Gateway Dashboard</div>
+              <div class="brand-title">DEEPCLAW</div>
+              <div class="brand-sub">Control</div>
             </div>
           </div>
         </div>
@@ -697,6 +703,51 @@ export function renderApp(state: AppViewState) {
                 onExpand: (taskId) => (state.tasksExpandedId = taskId),
                 onArchive: (task) => archiveDoneTask(state, task),
                 onArchiveAllDone: () => archiveAllDone(state),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "pages"
+            ? renderPages({
+                loading: state.pagesLoading,
+                pages: state.pagesList,
+                error: state.pagesError,
+                busy: state.pagesBusy,
+                baseUrl: state.pagesBaseUrl,
+                onRefresh: () => loadPagesList(state),
+                onDelete: (id) => deletePage(state, id),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "memory"
+            ? renderMemory({
+                loading: state.memoryLoading,
+                error: state.memoryError,
+                filesList: state.memoryFilesList,
+                fileActive: state.memoryFileActive,
+                fileContents: state.memoryFileContents,
+                fileDrafts: state.memoryFileDrafts,
+                saving: state.memorySaving,
+                onRefresh: () => loadMemoryFiles(state),
+                onSelectFile: (name) => {
+                  state.memoryFileActive = name;
+                  void loadMemoryFileContent(state, name);
+                },
+                onFileDraftChange: (name, content) => {
+                  state.memoryFileDrafts = { ...state.memoryFileDrafts, [name]: content };
+                },
+                onFileReset: (name) => {
+                  const base = state.memoryFileContents[name] ?? "";
+                  state.memoryFileDrafts = { ...state.memoryFileDrafts, [name]: base };
+                },
+                onFileSave: (name) => {
+                  const content =
+                    state.memoryFileDrafts[name] ?? state.memoryFileContents[name] ?? "";
+                  void saveMemoryFile(state, name, content);
+                },
               })
             : nothing
         }

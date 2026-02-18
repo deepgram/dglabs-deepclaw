@@ -18,7 +18,9 @@ import { loadDebug } from "./controllers/debug.ts";
 import { loadDevices } from "./controllers/devices.ts";
 import { loadExecApprovals } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
+import { loadMemoryFiles } from "./controllers/memory.ts";
 import { loadNodes } from "./controllers/nodes.ts";
+import { loadPagesList } from "./controllers/pages.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
@@ -200,6 +202,12 @@ export async function refreshActiveTab(host: SettingsHost) {
   }
   if (host.tab === "tasks") {
     await loadTasksList(host as unknown as OpenClawApp);
+  }
+  if (host.tab === "pages") {
+    await loadPagesList(host as unknown as OpenClawApp);
+  }
+  if (host.tab === "memory") {
+    await loadMemoryFiles(host as unknown as OpenClawApp);
   }
   if (host.tab === "skills") {
     await loadSkills(host as unknown as OpenClawApp);
