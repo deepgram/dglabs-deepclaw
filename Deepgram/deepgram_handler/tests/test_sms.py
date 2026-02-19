@@ -11,6 +11,14 @@ from app.services.sms_context import FALLBACK_MESSAGE, HOLDING_MESSAGE
 _NO_USER_MD = patch("app.services.sms_context.USER_MD_PATH", Path("/nonexistent/USER.md"))
 
 
+@pytest.fixture(autouse=True)
+def _clear_sessions():
+    """Ensure session registry is clean for each test."""
+    yield
+    from app.services.sms_session import _sessions
+    _sessions.clear()
+
+
 @pytest.fixture
 def client():
     return TestClient(app)
@@ -74,19 +82,16 @@ def test_inbound_sms_openclaw_error_returns_fallback(client):
     assert FALLBACK_MESSAGE in response.text
 
 
-def test_inbound_sms_timeout_sends_holding_then_delayed(client):
-    """When OpenClaw exceeds the reply timeout, return holding message and fire delayed reply."""
+def test_inbound_sms_timeout_sends_holding(client):
+    """When OpenClaw exceeds the reply timeout, return holding message."""
 
     async def _slow(*a, **kw):
         await asyncio.sleep(10)
         return "Late response"
 
-    mock_delayed = AsyncMock()
-
     with (
         patch("app.routers.sms.ask_openclaw", side_effect=_slow),
         patch("app.routers.sms.TWILIO_REPLY_TIMEOUT", 0.01),
-        patch("app.routers.sms.send_delayed_reply", mock_delayed),
     ):
         response = client.post(
             "/twilio/inbound-sms",
@@ -95,7 +100,6 @@ def test_inbound_sms_timeout_sends_holding_then_delayed(client):
 
     assert response.status_code == 200
     assert HOLDING_MESSAGE in response.text
-    mock_delayed.assert_called_once()
 
 
 def test_inbound_sms_long_reply_truncated(client):

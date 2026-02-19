@@ -1,15 +1,19 @@
 """Actions router: endpoints for OpenClaw agent to send SMS and make calls."""
 
+import json
 import logging
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
 from app.services.outbound_call import make_call
 from app.services.outbound_sms import send_sms
+from app.services.sms_sender_registry import check_general_rate_limit, get_sender
+from app.services.sms_session import notify_agent_sms
+from app.services import session_registry
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,10 @@ class SendSmsRequest(BaseModel):
     to: str
     body: str
     from_number: str | None = None
+
+
+class StatusUpdateRequest(BaseModel):
+    message: str
 
 
 class MakeCallRequest(BaseModel):
@@ -41,6 +49,7 @@ async def action_send_sms(req: SendSmsRequest):
     )
     try:
         result = await send_sms(to=req.to, text=req.body, from_number=req.from_number)
+        notify_agent_sms(req.to)
         logger.info("Action send-sms: success to=%s result=%s", req.to, result)
         return {"ok": True, **result}
     except ValueError as e:
@@ -63,6 +72,61 @@ async def action_send_sms(req: SendSmsRequest):
             status_code=500,
             content={"ok": False, "error": "Internal error sending SMS"},
         )
+
+
+@router.post("/status-update")
+async def action_status_update(req: StatusUpdateRequest, request: Request):
+    """Send a brief status update via SMS or voice injection.
+
+    Checks SMS sender registry first (text sessions), then falls back to
+    voice WebSocket injection (voice sessions).  Returns ``skipped`` for
+    sessions that support neither channel (e.g. Control UI).
+    """
+    session_key = request.headers.get("x-openclaw-session-key", "")
+    if not session_key:
+        return {"ok": True, "skipped": True, "reason": "no_session_key"}
+
+    # Rate limit (shared across SMS and voice)
+    allowed, wait = check_general_rate_limit(session_key)
+    if not allowed:
+        logger.info(
+            "Status-update rate-limited for %s (wait %.1fs)", session_key, wait,
+        )
+        return {"ok": True, "skipped": True, "reason": "rate_limited", "wait": wait}
+
+    # --- SMS path ---
+    phone, twilio_number = get_sender(session_key)
+    if phone:
+        try:
+            await send_sms(to=phone, text=req.message, from_number=twilio_number)
+            logger.info("Status-update SMS sent to %s: %s", phone, req.message[:100])
+            return {"ok": True, "channel": "sms"}
+        except Exception:
+            logger.exception("Status-update SMS failed for %s", phone)
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": "Failed to send status update SMS"},
+            )
+
+    # --- Voice path ---
+    dg_ws = session_registry.get_ws(session_key)
+    if dg_ws:
+        try:
+            await dg_ws.send(json.dumps({
+                "type": "InjectAgentMessage",
+                "message": req.message,
+            }))
+            logger.info("Status-update voice injected for %s: %s", session_key, req.message[:100])
+            return {"ok": True, "channel": "voice"}
+        except Exception:
+            logger.exception("Status-update voice injection failed for %s", session_key)
+            return JSONResponse(
+                status_code=502,
+                content={"ok": False, "error": "Failed to inject voice status update"},
+            )
+
+    # --- No channel available (e.g. Control UI) ---
+    return {"ok": True, "skipped": True, "reason": "no_channel"}
 
 
 @router.post("/make-call")

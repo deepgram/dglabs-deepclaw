@@ -472,9 +472,9 @@ async def test_run_agent_bridge_registers_session(monkeypatch):
     original_register = session_registry.register
     original_unregister = session_registry.unregister
 
-    def track_register(key, ws):
+    def track_register(key, ws, **kwargs):
         registered_keys.append(key)
-        original_register(key, ws)
+        original_register(key, ws, **kwargs)
 
     def track_unregister(key):
         unregistered_keys.append(key)
@@ -792,3 +792,65 @@ def test_build_settings_config_includes_end_call_function():
     end_call = next(f for f in functions if f["name"] == "end_call")
     assert "farewell" in end_call["parameters"]["properties"]
     assert "farewell" in end_call["parameters"]["required"]
+
+
+def test_build_settings_config_includes_mute_agent_function():
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="test-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="test-mute")
+    functions = config["agent"]["think"].get("functions", [])
+    names = [f["name"] for f in functions]
+    assert "mute_agent" in names
+
+    mute_fn = next(f for f in functions if f["name"] == "mute_agent")
+    assert "acknowledgment" in mute_fn["parameters"]["properties"]
+    assert "acknowledgment" in mute_fn["parameters"]["required"]
+
+
+def test_prompt_contains_mute_instruction(tmp_path, monkeypatch):
+    """Voice prompt includes mute instruction."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="mute-prompt")
+    prompt = config["agent"]["think"]["prompt"]
+
+    assert "mute_agent" in prompt
+    assert "quiet" in prompt.lower()
+    assert "unmute" in prompt.lower()
+
+
+def test_prompt_contains_background_task_guidance(tmp_path, monkeypatch):
+    """Voice prompt includes sub-agent communication guidance."""
+    _mock_workspace_empty(monkeypatch, tmp_path)
+
+    settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        _env_file=None,
+    )
+    config = build_settings_config(settings, call_id="bg-task-prompt")
+    prompt = config["agent"]["think"]["prompt"]
+
+    # Structured communication steps
+    assert "WHAT:" in prompt
+    assert "CONFIRM:" in prompt
+    assert "OPTIONS:" in prompt
+
+    # Specific language from the prompt
+    assert "sending an agent to" in prompt
+    assert "Wait on the line" in prompt
+    assert "text you the results" in prompt
+    assert "call you back" in prompt
+
+    # Delivery options
+    assert "WAIT:" in prompt
+    assert "TEXT:" in prompt
+    assert "CALLBACK:" in prompt

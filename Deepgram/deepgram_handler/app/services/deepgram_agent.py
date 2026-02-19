@@ -37,6 +37,7 @@ from app.services.user_md_parser import (
 )
 from app.services.session_timers import SessionTimers, SessionTimerCallbacks
 from app.services.user_profile import extract_user_profile
+from app.services.voice_status_injector import VoiceStatusInjector
 from app.services.workspace import CallInfo, TranscriptEntry
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ WORKSPACE_DIR = Path.home() / ".openclaw" / "workspace"
 USER_MD_PATH = WORKSPACE_DIR / "USER.md"
 IDENTITY_MD_PATH = WORKSPACE_DIR / "IDENTITY.md"
 CALLS_MD_PATH = WORKSPACE_DIR / "test-voice-agent" / "CALLS.md"
+TEXTS_MD_PATH = WORKSPACE_DIR / "TEXTS.md"
 NEXT_GREETING_PATH = WORKSPACE_DIR / "NEXT_GREETING.txt"
 
 
@@ -78,6 +80,7 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
     user_md = _read_file(USER_MD_PATH)
     identity_md = _read_file(IDENTITY_MD_PATH)
     calls_md = _read_file(CALLS_MD_PATH)
+    texts_md = _read_file(TEXTS_MD_PATH)
 
     # Parse USER.md
     profile = parse_user_markdown(user_md) if user_md else None
@@ -107,18 +110,58 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
     if caller_phone:
         lines.append(f"- The caller's phone number is {caller_phone}.")
     lines.append("- To send a text message, use the send_sms tool (NOT the message tool).")
+    lines.append(
+        "- If asked to be quiet, mute, or stop talking, use the mute_agent function. "
+        "Say something brief like \"Going quiet\" before muting. "
+        "The caller can bring you back by saying your name or \"unmute\"."
+    )
     lines.append("")
     lines.append("Background tasks:")
     lines.append(
         "- For anything that takes more than a few seconds (research, writing, analysis, "
         "lookups, multi-step tasks), use sessions_spawn to run it in the background."
     )
-    lines.append(
-        "- Tell the caller you'll text them the results. Example: "
-        "\"I'll research that and text you what I find.\""
-    )
-    lines.append("- Do NOT make the caller wait on the phone while you do long tool calls or web searches.")
     lines.append("- Quick factual answers (weather, time, simple math) can be answered directly.")
+    lines.append("- Before starting any long-running tool call, use status_update to tell the caller what you're doing.")
+    lines.append("")
+    lines.append("When spawning a background task:")
+    lines.append(
+        '  1. WHAT: State specifically what the agent will do. Say "I\'m sending an agent to [specific task]" '
+        '— not "I\'ll spin up a background task."'
+    )
+    lines.append('  2. CONFIRM: Confirm it launched. Say "That\'s running now."')
+    lines.append(
+        "  3. OPTIONS: Ask how they'd like the results delivered:"
+    )
+    lines.append(
+        '     - Wait on the line ("Want to hold while it runs? Should take about a minute.")'
+    )
+    lines.append(
+        '     - Get a text ("I can text you the results so you can hang up.")'
+    )
+    lines.append(
+        '     - Get a callback ("I can call you back when it\'s ready.")'
+    )
+    lines.append(
+        '  Example: "I\'m sending an agent to check your recent emails. That\'s running now. '
+        'Want to hold, or should I text you what it finds?"'
+    )
+    lines.append("")
+    lines.append("Delivering results based on caller's choice:")
+    lines.append(
+        "- WAIT: Keep the call open. Check in every 15-20 seconds with a brief update "
+        '("Still working on that"). When the sub-agent finishes, read back the results.'
+    )
+    lines.append(
+        "- TEXT: Tell them you'll text the results and they're free to hang up."
+    )
+    lines.append(
+        "- CALLBACK: Tell them you'll call back in a few minutes with results, then end the call."
+    )
+    lines.append(
+        "- If the caller asks about a running task, give a status update: "
+        "\"That's still running — should have results shortly.\""
+    )
     if caller_phone:
         lines.append(
             f"- When spawning a background task, tell the sub-agent to deliver results by calling: "
@@ -153,6 +196,17 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
                     for sub_line in entry.split("\n"):
                         lines.append(f"  {sub_line}")
 
+
+    # -- Recent texts (shown regardless of caller profile) --
+    if texts_md:
+        recent_texts = parse_calls_md(texts_md, count=3)
+        if recent_texts:
+            lines.append("")
+            lines.append("Recent texts:")
+            for entry in recent_texts:
+                for sub_line in entry.split("\n"):
+                    lines.append(f"  {sub_line}")
+
     # -- Action nudges --
     if settings.ENABLE_ACTION_NUDGES:
         lines.append("")
@@ -182,7 +236,7 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
         lines.append("- Goal: names exchanged, something useful done, give them a reason to call back.")
 
     # Debug: summarize which sections were included
-    sections = ["voice_constraints"]
+    sections = ["voice_constraints", "sub_agent_communication"]
     if profile_filled:
         display_name = profile.call_name or profile.name or "unnamed"
         sections.append(f"caller_context ({display_name})")
@@ -190,6 +244,10 @@ def _build_voice_prompt(settings: Settings, caller_phone: str | None = None) -> 
             recent = parse_calls_md(calls_md, count=3)
             if recent:
                 sections.append(f"recent_calls ({len(recent)})")
+    if texts_md:
+        recent_texts = parse_calls_md(texts_md, count=3)
+        if recent_texts:
+            sections.append(f"recent_texts ({len(recent_texts)})")
     if settings.ENABLE_ACTION_NUDGES:
         if profile_filled and not is_first:
             sections.append("returning_nudge")
@@ -478,6 +536,23 @@ def build_settings_config(
                             "required": ["farewell"],
                         },
                     },
+                    {
+                        "name": "mute_agent",
+                        "description": (
+                            "Mute yourself so you stop responding. Use when asked to "
+                            "be quiet, shut up, mute, or stop talking."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "acknowledgment": {
+                                    "type": "string",
+                                    "description": "Brief message to say before going silent (e.g. 'Going quiet now')",
+                                },
+                            },
+                            "required": ["acknowledgment"],
+                        },
+                    },
                 ],
             },
             "speak": {
@@ -486,6 +561,9 @@ def build_settings_config(
             "greeting": greeting,
         },
     }
+
+    fn_names = [f["name"] for f in config["agent"]["think"]["functions"]]
+    logger.info("[MUTE-DEBUG] Settings config built with functions: %s", fn_names)
 
 
 async def _twilio_to_deepgram(
@@ -530,6 +608,7 @@ async def _deepgram_to_twilio(
     stop_event: asyncio.Event,
     transcript: list[TranscriptEntry] | None = None,
     timers: SessionTimers | None = None,
+    session_key: str | None = None,
 ) -> None:
     """Forward audio from Deepgram to Twilio and handle agent events."""
     end_call_farewell_pending = False
@@ -591,6 +670,10 @@ async def _deepgram_to_twilio(
                     fn_name = msg.get("function_name", "")
                     fn_call_id = msg.get("function_call_id", "")
                     fn_input = msg.get("input", {})
+                    logger.info(
+                        "[MUTE-DEBUG] FunctionCallRequest received: name=%s id=%s input=%s",
+                        fn_name, fn_call_id, json.dumps(fn_input)[:200],
+                    )
 
                     if fn_name == "end_call":
                         logger.info("end_call function invoked by LLM")
@@ -609,6 +692,25 @@ async def _deepgram_to_twilio(
                             "message": farewell,
                         }))
                         end_call_farewell_pending = True
+                    elif fn_name == "mute_agent":
+                        logger.info("mute_agent function invoked by LLM")
+                        if session_key:
+                            session_registry.set_muted(session_key, True)
+                            session = session_registry.get_session(session_key)
+                            if session and session.timers:
+                                session.timers.pause()
+                        # ACK the function call
+                        await dg_ws.send(json.dumps({
+                            "type": "FunctionCallResponse",
+                            "function_call_id": fn_call_id,
+                            "output": json.dumps({"ok": True, "status": "muted"}),
+                        }))
+                        # Inject acknowledgment
+                        ack = fn_input.get("acknowledgment", "Going quiet now.")
+                        await dg_ws.send(json.dumps({
+                            "type": "InjectAgentMessage",
+                            "message": ack,
+                        }))
                     else:
                         logger.info("Unhandled function call: %s", fn_name)
 
@@ -684,7 +786,18 @@ async def run_agent_bridge(
         await dg_ws.send(json.dumps(config))
         logger.info("Sent settings config to Deepgram")
 
-        session_registry.register(session_key, dg_ws)
+        # Resolve agent name from IDENTITY.md for mute/unmute
+        agent_name = None
+        identity_content = _read_file(IDENTITY_MD_PATH)
+        if identity_content:
+            from app.services.agent_identity import parse_identity_md
+            identity = parse_identity_md(identity_content)
+            if identity.name:
+                agent_name = identity.name
+                logger.info("Agent name resolved: %s", agent_name)
+
+        session_registry.register(session_key, dg_ws, agent_name=agent_name)
+        logger.info("[MUTE-DEBUG] Session registered: key=%s agent_name=%s", session_key, agent_name)
 
         stop_event = asyncio.Event()
         transcript: list[TranscriptEntry] = []
@@ -718,10 +831,16 @@ async def run_agent_bridge(
                     log=lambda msg: logger.info(msg),
                 ),
             )
+            session_registry.set_timers(session_key, timers)
+
+        # Create voice status injector for tool-progress phrases
+        injector = VoiceStatusInjector(session_key, dg_ws)
+        await injector.start()
+        session_registry.set_injector(session_key, injector)
 
         t2d = asyncio.create_task(_twilio_to_deepgram(twilio_ws, dg_ws, stop_event))
         d2t = asyncio.create_task(
-            _deepgram_to_twilio(dg_ws, twilio_ws, stream_sid, stop_event, transcript, timers)
+            _deepgram_to_twilio(dg_ws, twilio_ws, stream_sid, stop_event, transcript, timers, session_key)
         )
 
         await asyncio.gather(t2d, d2t, return_exceptions=True)
@@ -732,6 +851,9 @@ async def run_agent_bridge(
             logger.info("Session timers cleared on bridge teardown")
 
         if session_key:
+            session = session_registry.get_session(session_key)
+            if session and session.injector:
+                await session.injector.stop()
             session_registry.unregister(session_key)
 
         try:

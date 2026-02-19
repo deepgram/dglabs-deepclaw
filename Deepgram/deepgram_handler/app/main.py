@@ -3,6 +3,7 @@
 import logging
 import socket
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,8 +16,40 @@ logging.basicConfig(
     format="%(levelname)s %(name)s: %(message)s",
     stream=sys.stderr,
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
-app = FastAPI(title="Twilio Proxy", version="0.1.0")
+
+class _PageVersionFilter(logging.Filter):
+    """Drop noisy 200 OK logs from page-builder version polling."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "/pages/" in msg and "/version" in msg and " 200 " in msg:
+            return False
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_PageVersionFilter())
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Connect the persistent gateway WebSocket client for SMS event streaming."""
+    from app.config import get_settings
+    from app.services.gateway_ws import init_gateway_ws
+
+    try:
+        settings = get_settings()
+        await init_gateway_ws(settings.OPENCLAW_GATEWAY_TOKEN)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Gateway WS client failed to start (SMS intermediates disabled)",
+            exc_info=True,
+        )
+    yield
+
+
+app = FastAPI(title="Twilio Proxy", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -16,7 +16,11 @@ from app.services.sms_context import (
 
 def test_new_user_gets_new_user_prompt():
     """When USER.md does not exist, system prompt should be the new-user prompt."""
-    with patch("app.services.sms_context.USER_MD_PATH", Path("/nonexistent/USER.md")):
+    with (
+        patch("app.services.sms_context.USER_MD_PATH", Path("/nonexistent/USER.md")),
+        patch("app.services.sms_context.CALLS_MD_PATH", Path("/nonexistent/CALLS.md")),
+        patch("app.services.sms_context.TEXTS_MD_PATH", Path("/nonexistent/TEXTS.md")),
+    ):
         messages = build_sms_messages("hey there")
 
     assert len(messages) == 2
@@ -45,7 +49,11 @@ def test_empty_user_md_treated_as_new_user(tmp_path):
     user_md = tmp_path / "USER.md"
     user_md.write_text("   ")
 
-    with patch("app.services.sms_context.USER_MD_PATH", user_md):
+    with (
+        patch("app.services.sms_context.USER_MD_PATH", user_md),
+        patch("app.services.sms_context.CALLS_MD_PATH", Path("/nonexistent/CALLS.md")),
+        patch("app.services.sms_context.TEXTS_MD_PATH", Path("/nonexistent/TEXTS.md")),
+    ):
         messages = build_sms_messages("hi")
 
     assert messages[0]["content"] == NEW_USER_SMS_PROMPT
@@ -58,7 +66,11 @@ def test_multimodal_content_passed_through():
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
     ]
 
-    with patch("app.services.sms_context.USER_MD_PATH", Path("/nonexistent/USER.md")):
+    with (
+        patch("app.services.sms_context.USER_MD_PATH", Path("/nonexistent/USER.md")),
+        patch("app.services.sms_context.CALLS_MD_PATH", Path("/nonexistent/CALLS.md")),
+        patch("app.services.sms_context.TEXTS_MD_PATH", Path("/nonexistent/TEXTS.md")),
+    ):
         messages = build_sms_messages(content)
 
     assert messages[1]["content"] is content
@@ -111,12 +123,31 @@ def test_truncate_custom_limit():
 async def test_ask_openclaw_returns_reply():
     from app.services.sms_context import ask_openclaw
 
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"choices": [{"message": {"content": "Hi there!"}}]}
-    mock_resp.raise_for_status = MagicMock()
+    # Simulate an SSE stream response with two data chunks.
+    sse_lines = [
+        'data: {"choices":[{"delta":{"content":"Hi "},"finish_reason":null}]}',
+        'data: {"choices":[{"delta":{"content":"there!"},"finish_reason":"stop"}]}',
+        "data: [DONE]",
+    ]
 
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_resp
+    class FakeStreamResp:
+        def raise_for_status(self):
+            pass
+
+        async def aiter_lines(self):
+            for line in sse_lines:
+                yield line
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+    fake_resp = FakeStreamResp()
+
+    mock_client = MagicMock()
+    mock_client.stream.return_value = fake_resp
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
@@ -127,15 +158,19 @@ async def test_ask_openclaw_returns_reply():
     with (
         patch("app.services.sms_context.httpx.AsyncClient", return_value=mock_client),
         patch("app.services.sms_context.USER_MD_PATH", Path("/nonexistent/USER.md")),
+        patch("app.services.sms_context.CALLS_MD_PATH", Path("/nonexistent/CALLS.md")),
+        patch("app.services.sms_context.TEXTS_MD_PATH", Path("/nonexistent/TEXTS.md")),
     ):
         result = await ask_openclaw(settings, "session-key", "hello")
 
     assert result == "Hi there!"
 
-    call_args = mock_client.post.call_args
+    call_args = mock_client.stream.call_args
+    assert call_args[0][0] == "POST"  # method
     headers = call_args[1]["headers"]
     assert headers["x-openclaw-session-key"] == "session-key"
     body = call_args[1]["json"]
+    assert body["stream"] is True
     assert body["messages"][0]["role"] == "system"
     assert body["messages"][1]["role"] == "user"
     assert body["messages"][1]["content"] == "hello"
