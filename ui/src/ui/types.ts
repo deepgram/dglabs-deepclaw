@@ -378,6 +378,31 @@ export type AgentsFilesSetResult = {
   file: AgentFileEntry;
 };
 
+export type MemoryFileEntry = {
+  name: string;
+  path: string;
+  size?: number;
+  updatedAtMs?: number;
+  pinned?: boolean;
+  content?: string;
+};
+
+export type MemoryFilesListResult = {
+  workspace: string;
+  files: MemoryFileEntry[];
+};
+
+export type MemoryFilesGetResult = {
+  workspace: string;
+  file: MemoryFileEntry;
+};
+
+export type MemoryFilesSetResult = {
+  ok: true;
+  workspace: string;
+  file: MemoryFileEntry;
+};
+
 export type GatewaySessionRow = {
   key: string;
   kind: "direct" | "group" | "global" | "unknown";
@@ -772,4 +797,35 @@ export type LogEntry = {
   subsystem?: string | null;
   message?: string | null;
   meta?: Record<string, unknown> | null;
+};
+
+export type TaskReminderItem = {
+  action: "call" | "message";
+  channel?: string;
+  note?: string;
+  cronJobId?: string;
+};
+
+export type TaskItem = {
+  id: string;
+  title: string;
+  status: "open" | "done" | "archived";
+  notes?: string;
+  dueDate?: string;
+  dueAt?: string;
+  assignee?: string;
+  reminder?: TaskReminderItem;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PageItem = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  version: number;
+  blockCount: number;
+  createdAt: string;
+  updatedAt: string;
 };

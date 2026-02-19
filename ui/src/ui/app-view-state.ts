@@ -31,7 +31,8 @@ import type {
   SkillStatusReport,
   StatusSummary,
 } from "./types.ts";
-import type { ChatAttachment, ChatQueueItem, CronFormState } from "./ui-types.ts";
+import type { PageItem, TaskItem, MemoryFilesListResult } from "./types.ts";
+import type { ChatAttachment, ChatQueueItem, CronFormState, TaskFormState } from "./ui-types.ts";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import type { SessionLogEntry } from "./views/usage.ts";
 
@@ -184,6 +185,27 @@ export type AppViewState = {
   usageLogFilterTools: string[];
   usageLogFilterHasTools: boolean;
   usageLogFilterQuery: string;
+  pagesLoading: boolean;
+  pagesList: PageItem[];
+  pagesError: string | null;
+  pagesBusy: boolean;
+  pagesBaseUrl: string | null;
+  memoryLoading: boolean;
+  memoryError: string | null;
+  memoryFilesList: MemoryFilesListResult | null;
+  memoryFileContents: Record<string, string>;
+  memoryFileDrafts: Record<string, string>;
+  memoryFileActive: string | null;
+  memorySaving: boolean;
+  tasksLoading: boolean;
+  tasksList: TaskItem[];
+  tasksError: string | null;
+  tasksForm: TaskFormState;
+  tasksBusy: boolean;
+  tasksEditingId: string | null;
+  tasksFormOpen: boolean;
+  tasksFilter: "open" | "done" | "archived" | "all";
+  tasksExpandedId: string | null;
   cronLoading: boolean;
   cronJobs: CronJob[];
   cronStatus: CronStatus | null;

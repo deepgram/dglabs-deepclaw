@@ -13,11 +13,32 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+_CONFIRMATION_RE = re.compile(
+    r"^(yep|yeah|yea|yes|yup|uh-huh|mhm|mm-hmm|ok|okay|k|sure|right|correct|exactly"
+    r"|absolutely|definitely|totally|of course|for sure|sounds good|got it|that works"
+    r"|that's (?:fine|good|great|okay|ok|right|correct|perfect)"
+    r"|no worries|no problem|all good|perfect|great|good|fine|nice|cool|alright"
+    r"|understood|makes sense|i see|fair enough|true|agreed|indeed)\.?!?$",
+    re.IGNORECASE,
+)
+_MAX_CONFIRMATION_WORDS = 5
+
+FILLER_SKIP = "__SKIP__"
+
+
+def is_short_confirmation(message: str) -> bool:
+    """Check if a message is a short confirmation/acknowledgment."""
+    cleaned = message.strip()
+    if not cleaned or len(cleaned.split()) > _MAX_CONFIRMATION_WORDS:
+        return False
+    return bool(_CONFIRMATION_RE.match(cleaned))
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 HARD_TIMEOUT_S = 2.0
@@ -27,6 +48,8 @@ MAX_TOKENS = 50
 def _build_prompt(user_message: str) -> str:
     return (
         f'You\'re a voice assistant on a phone call. The user just said: "{user_message}". '
+        "If the user's message is a simple confirmation, agreement, or acknowledgment "
+        '(like "yes", "okay", "exactly", "sounds good"), output exactly: SKIP\n'
         'You need a moment to think. Generate a single short "thinking" phrase (under 10 words) '
         "that shows you're considering their specific question -- not a generic acknowledgment.\n"
         'BAD: "Got it." "Sure thing." "Absolutely." (these sound like the real answer starting)\n'
@@ -103,6 +126,10 @@ async def generate_filler_phrase(
                     if block.get("type") == "text":
                         text = block.get("text", "").strip()
                         break
+
+                if text.strip().upper().rstrip(".") == "SKIP":
+                    logger.info("[FILLER-SKIP] Haiku returned SKIP (confirmation detected)")
+                    return FILLER_SKIP
 
                 if text:
                     logger.info("Haiku filler: generated phrase in %.0fms: %s", elapsed_ms, text)

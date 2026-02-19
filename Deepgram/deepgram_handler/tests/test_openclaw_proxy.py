@@ -401,3 +401,237 @@ async def test_proxy_skips_filler_when_threshold_zero(monkeypatch):
     mock_dg_ws.send.assert_not_called()
 
     session_registry.unregister("agent:main:disabled")
+
+
+# ---------------------------------------------------------------------------
+# Mute interception tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_proxy_returns_noop_when_muted(monkeypatch):
+    """When session is muted, proxy returns empty SSE response without calling gateway."""
+    from httpx import AsyncClient
+    from app.config import Settings
+
+    mock_dg_ws = AsyncMock()
+    session_registry.register("agent:main:muted-call", mock_dg_ws)
+    session_registry.set_muted("agent:main:muted-call", True)
+
+    test_settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        FILLER_THRESHOLD_MS=0,
+        _env_file=None,
+    )
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings", lambda: test_settings
+    )
+
+    # No mock client needed — the proxy should short-circuit
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+        resp = await test_client.post(
+            "/v1/chat/completions",
+            json={"model": "test", "messages": [{"role": "user", "content": "what time is it"}]},
+            headers={"x-openclaw-session-key": "agent:main:muted-call"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert "data:" in body
+    assert "finish_reason" in body
+    assert "stop" in body
+
+    session_registry.unregister("agent:main:muted-call")
+
+
+@pytest.mark.asyncio
+async def test_proxy_unmutes_on_agent_name(monkeypatch):
+    """When muted and user says agent name, session is unmuted and request proxies normally."""
+    from httpx import AsyncClient
+    from app.config import Settings
+
+    mock_dg_ws = AsyncMock()
+    session_registry.register("agent:main:unmute-call", mock_dg_ws, agent_name="Wren")
+    session_registry.set_muted("agent:main:unmute-call", True)
+
+    test_settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        FILLER_THRESHOLD_MS=0,
+        _env_file=None,
+    )
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings", lambda: test_settings
+    )
+
+    # Mock the upstream gateway
+    async def fast_send(request, *, stream=False):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"content-type": "text/event-stream"}
+
+        async def aiter_bytes():
+            yield b'data: {"choices":[{"delta":{"content":"I\'m back!"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        resp.aiter_bytes = aiter_bytes
+        resp.aclose = AsyncMock()
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.build_request = MagicMock(return_value=MagicMock())
+    mock_client.send = fast_send
+    mock_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.httpx.AsyncClient", lambda **kw: mock_client
+    )
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+        resp = await test_client.post(
+            "/v1/chat/completions",
+            json={"model": "test", "messages": [{"role": "user", "content": "Hey Wren, are you there?"}]},
+            headers={"x-openclaw-session-key": "agent:main:unmute-call"},
+        )
+
+    assert resp.status_code == 200
+    assert "I'm back!" in resp.text
+
+    # Session should now be unmuted
+    assert session_registry.is_muted("agent:main:unmute-call") is False
+
+    session_registry.unregister("agent:main:unmute-call")
+
+
+@pytest.mark.asyncio
+async def test_proxy_unmutes_on_keyword(monkeypatch):
+    """When muted and user says 'unmute', session is unmuted."""
+    from httpx import AsyncClient
+    from app.config import Settings
+
+    mock_dg_ws = AsyncMock()
+    session_registry.register("agent:main:unmute-kw", mock_dg_ws)
+    session_registry.set_muted("agent:main:unmute-kw", True)
+
+    test_settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        FILLER_THRESHOLD_MS=0,
+        _env_file=None,
+    )
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings", lambda: test_settings
+    )
+
+    async def fast_send(request, *, stream=False):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"content-type": "text/event-stream"}
+
+        async def aiter_bytes():
+            yield b'data: {"choices":[{"delta":{"content":"Unmuted!"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        resp.aiter_bytes = aiter_bytes
+        resp.aclose = AsyncMock()
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.build_request = MagicMock(return_value=MagicMock())
+    mock_client.send = fast_send
+    mock_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.httpx.AsyncClient", lambda **kw: mock_client
+    )
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+        resp = await test_client.post(
+            "/v1/chat/completions",
+            json={"model": "test", "messages": [{"role": "user", "content": "unmute"}]},
+            headers={"x-openclaw-session-key": "agent:main:unmute-kw"},
+        )
+
+    assert resp.status_code == 200
+    assert session_registry.is_muted("agent:main:unmute-kw") is False
+
+    session_registry.unregister("agent:main:unmute-kw")
+
+
+# ---------------------------------------------------------------------------
+# Filler skip for short confirmations
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_proxy_skips_filler_for_confirmation(monkeypatch):
+    """Short confirmations like 'Yep' should not trigger filler injection."""
+    from httpx import AsyncClient
+    from app.config import Settings
+
+    # Register a mock Deepgram WS
+    mock_dg_ws = AsyncMock()
+    session_registry.register("agent:main:confirm-call", mock_dg_ws)
+
+    # Configure settings with low threshold — filler WOULD fire if not skipped
+    test_settings = Settings(
+        DEEPGRAM_API_KEY="test-key",
+        OPENCLAW_GATEWAY_TOKEN="gw-token",
+        FILLER_THRESHOLD_MS=50,  # 50ms for fast test
+        FILLER_PHRASES="One moment...,Working on it.",
+        FILLER_DYNAMIC=False,
+        _env_file=None,
+    )
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.get_settings", lambda: test_settings
+    )
+
+    # Simulate a slow OpenClaw response (200ms > 50ms threshold)
+    async def slow_send(request, *, stream=False):
+        await asyncio.sleep(0.2)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"content-type": "text/event-stream"}
+
+        async def aiter_bytes():
+            yield b'data: {"choices":[{"delta":{"content":"Got it"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        resp.aiter_bytes = aiter_bytes
+        resp.aclose = AsyncMock()
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.build_request = MagicMock(return_value=MagicMock())
+    mock_client.send = slow_send
+    mock_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        "app.routers.openclaw_proxy.httpx.AsyncClient", lambda **kw: mock_client
+    )
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as test_client:
+        resp = await test_client.post(
+            "/v1/chat/completions",
+            json={"model": "test", "messages": [{"role": "user", "content": "Yep"}]},
+            headers={"x-openclaw-session-key": "agent:main:confirm-call"},
+        )
+
+    assert resp.status_code == 200
+
+    # Filler should NOT have been injected (confirmation detected)
+    mock_dg_ws.send.assert_not_called()
+
+    # Cleanup
+    session_registry.unregister("agent:main:confirm-call")

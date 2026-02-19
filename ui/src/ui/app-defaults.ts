@@ -1,5 +1,5 @@
 import type { LogLevel } from "./types.ts";
-import type { CronFormState } from "./ui-types.ts";
+import type { CronFormState, TaskFormState } from "./ui-types.ts";
 
 export const DEFAULT_LOG_LEVEL_FILTERS: Record<LogLevel, boolean> = {
   trace: true,
@@ -29,4 +29,15 @@ export const DEFAULT_CRON_FORM: CronFormState = {
   deliveryChannel: "last",
   deliveryTo: "",
   timeoutSeconds: "",
+};
+
+export const DEFAULT_TASK_FORM: TaskFormState = {
+  title: "",
+  notes: "",
+  dueDate: "",
+  dueAt: "",
+  assignee: "",
+  reminderAction: "",
+  reminderChannel: "",
+  reminderNote: "",
 };

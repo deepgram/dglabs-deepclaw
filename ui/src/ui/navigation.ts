@@ -4,7 +4,17 @@ export const TAB_GROUPS = [
   { label: "Chat", tabs: ["chat"] },
   {
     label: "Control",
-    tabs: ["overview", "channels", "instances", "sessions", "usage", "cron"],
+    tabs: [
+      "overview",
+      "channels",
+      "instances",
+      "sessions",
+      "usage",
+      "cron",
+      "tasks",
+      "pages",
+      "memory",
+    ],
   },
   { label: "Agent", tabs: ["agents", "skills", "nodes"] },
   { label: "Settings", tabs: ["config", "debug", "logs"] },
@@ -20,6 +30,9 @@ export type Tab =
   | "sessions"
   | "usage"
   | "cron"
+  | "tasks"
+  | "pages"
+  | "memory"
   | "skills"
   | "nodes"
   | "chat"
@@ -35,6 +48,9 @@ const TAB_PATHS: Record<Tab, string> = {
   sessions: "/sessions",
   usage: "/usage",
   cron: "/cron",
+  tasks: "/tasks",
+  pages: "/pages",
+  memory: "/memory",
   skills: "/skills",
   nodes: "/nodes",
   chat: "/chat",
@@ -142,6 +158,12 @@ export function iconForTab(tab: Tab): IconName {
       return "barChart";
     case "cron":
       return "loader";
+    case "tasks":
+      return "check";
+    case "pages":
+      return "fileText";
+    case "memory":
+      return "fileText";
     case "skills":
       return "zap";
     case "nodes":
@@ -173,6 +195,12 @@ export function titleForTab(tab: Tab) {
       return "Usage";
     case "cron":
       return "Cron Jobs";
+    case "tasks":
+      return "Tasks";
+    case "pages":
+      return "Pages";
+    case "memory":
+      return "Memory";
     case "skills":
       return "Skills";
     case "nodes":
@@ -206,6 +234,12 @@ export function subtitleForTab(tab: Tab) {
       return "";
     case "cron":
       return "Schedule wakeups and recurring agent runs.";
+    case "tasks":
+      return "Manage tasks with optional call/message reminders.";
+    case "pages":
+      return "Browse agent-created pages and visual content.";
+    case "memory":
+      return "Browse and edit agent memory files.";
     case "skills":
       return "Manage skill availability and API key injection.";
     case "nodes":

@@ -28,6 +28,7 @@ import type {
   StatusSummary,
   NostrProfile,
 } from "./types.ts";
+import type { PageItem, TaskItem, MemoryFilesListResult } from "./types.ts";
 import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import {
   handleChannelConfigReload as handleChannelConfigReloadInternal,
@@ -47,7 +48,7 @@ import {
   handleSendChat as handleSendChatInternal,
   removeQueuedMessage as removeQueuedMessageInternal,
 } from "./app-chat.ts";
-import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS } from "./app-defaults.ts";
+import { DEFAULT_CRON_FORM, DEFAULT_LOG_LEVEL_FILTERS, DEFAULT_TASK_FORM } from "./app-defaults.ts";
 import { connectGateway as connectGatewayInternal } from "./app-gateway.ts";
 import {
   handleConnected,
@@ -79,7 +80,12 @@ import {
 import { resolveInjectedAssistantIdentity } from "./assistant-identity.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
-import { type ChatAttachment, type ChatQueueItem, type CronFormState } from "./ui-types.ts";
+import {
+  type ChatAttachment,
+  type ChatQueueItem,
+  type CronFormState,
+  type TaskFormState,
+} from "./ui-types.ts";
 
 declare global {
   interface Window {
@@ -281,6 +287,30 @@ export class OpenClawApp extends LitElement {
 
   // Non-reactive (don’t trigger renders just for timer bookkeeping).
   usageQueryDebounceTimer: number | null = null;
+
+  @state() pagesLoading = false;
+  @state() pagesList: PageItem[] = [];
+  @state() pagesError: string | null = null;
+  @state() pagesBusy = false;
+  @state() pagesBaseUrl: string | null = null;
+
+  @state() memoryLoading = false;
+  @state() memoryError: string | null = null;
+  @state() memoryFilesList: MemoryFilesListResult | null = null;
+  @state() memoryFileContents: Record<string, string> = {};
+  @state() memoryFileDrafts: Record<string, string> = {};
+  @state() memoryFileActive: string | null = null;
+  @state() memorySaving = false;
+
+  @state() tasksLoading = false;
+  @state() tasksList: TaskItem[] = [];
+  @state() tasksError: string | null = null;
+  @state() tasksForm: TaskFormState = { ...DEFAULT_TASK_FORM };
+  @state() tasksBusy = false;
+  @state() tasksEditingId: string | null = null;
+  @state() tasksFormOpen = false;
+  @state() tasksFilter: "open" | "done" | "archived" | "all" = "open";
+  @state() tasksExpandedId: string | null = null;
 
   @state() cronLoading = false;
   @state() cronJobs: CronJob[] = [];

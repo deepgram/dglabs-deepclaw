@@ -6,6 +6,7 @@ HTTPS port without needing a dedicated IP for a non-standard port.
 """
 
 import asyncio
+import dataclasses
 import json
 import logging
 import random
@@ -16,7 +17,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
-from app.services.filler import generate_filler_phrase
+from app.services.filler import generate_filler_phrase, is_short_confirmation, FILLER_SKIP
+from app.services import session_registry
 from app.services.session_registry import get_ws
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["openclaw-proxy"])
 
 OPENCLAW_BASE = "http://localhost:18789"
+
+# ---------------------------------------------------------------------------
+# Per-session in-flight tracking for request superseding
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass
+class _InflightEntry:
+    seq: int
+    cancel: asyncio.Event
+
+_inflight: dict[str, _InflightEntry] = {}
 
 # OpenClaw injects these markers into the conversation history sent to the
 # LLM.  Smaller models sometimes echo them back in their response, which is
@@ -101,6 +114,32 @@ def _chunk_has_content(chunk: bytes) -> bool:
     return after < len(chunk) and chunk[after : after + 1] != b'"'
 
 
+def _muted_noop_response() -> StreamingResponse:
+    """Return a minimal OpenAI-format SSE stream with empty content.
+
+    When the agent is muted, we return this instead of proxying to the
+    gateway.  Deepgram's agent receives an empty completion and produces
+    no speech, keeping the agent silent while STT continues listening.
+    """
+    import uuid as _uuid
+
+    chunk_id = f"chatcmpl-muted-{_uuid.uuid4().hex[:8]}"
+
+    async def _stream():
+        yield (
+            f'data: {{"id":"{chunk_id}","object":"chat.completion.chunk",'
+            f'"choices":[{{"index":0,"delta":{{"role":"assistant","content":""}},'
+            f'"finish_reason":"stop"}}]}}\n\n'
+        ).encode()
+        yield b"data: [DONE]\n\n"
+
+    return StreamingResponse(
+        content=_stream(),
+        status_code=200,
+        media_type="text/event-stream",
+    )
+
+
 @router.api_route("/v1/chat/completions", methods=["POST"])
 async def proxy_chat_completions(request: Request):
     """Proxy POST /v1/chat/completions to the local OpenClaw gateway.
@@ -119,12 +158,58 @@ async def proxy_chat_completions(request: Request):
     settings = get_settings()
     session_key = request.headers.get("x-openclaw-session-key")
     dg_ws = get_ws(session_key) if session_key else None
+
+    # --- Mute check ---
+    muted = session_registry.is_muted(session_key) if session_key else False
+    logger.info("[MUTE-DEBUG] proxy request: session=%s muted=%s", session_key, muted)
+    if session_key and muted:
+        user_message = _extract_last_user_message(body)
+        logger.info("[MUTE-DEBUG] muted session, checking unmute: user_text=%s", repr(user_message[:80]) if user_message else None)
+        if user_message and session_registry.should_unmute(session_key, user_message):
+            session_registry.set_muted(session_key, False)
+            session = session_registry.get_session(session_key)
+            if session and session.timers:
+                session.timers.resume()
+            logger.info("[MUTE-DEBUG] Session UNMUTED by user text: %s", user_message[:60])
+            # Fall through to normal proxy — agent will respond
+        else:
+            logger.info("[MUTE-DEBUG] Session still muted, returning no-op SSE response")
+            return _muted_noop_response()
+    # --- Reset voice status injector for new turn ---
+    if session_key:
+        session = session_registry.get_session(session_key)
+        if session and session.injector:
+            session.injector.reset()
+
+    # --- Request superseding (voice sessions only) ---
+    cancel_event: asyncio.Event | None = None
+    my_seq: int | None = None
+
+    if session_key and dg_ws:
+        cancel_event = asyncio.Event()
+        old = _inflight.get(session_key)
+        if old:
+            old.cancel.set()  # signal old request to stop
+            my_seq = old.seq + 1
+            logger.info("Superseding request for %s (seq %d→%d)", session_key, old.seq, my_seq)
+        else:
+            my_seq = 1
+        _inflight[session_key] = _InflightEntry(seq=my_seq, cancel=cancel_event)
+
     threshold_ms = settings.FILLER_THRESHOLD_MS
 
     filler_task: asyncio.Task | None = None
+    user_message = _extract_last_user_message(body)
 
-    if dg_ws and threshold_ms > 0:
-        user_message = _extract_last_user_message(body)
+    # Skip filler for short confirmations like "Yep", "Exactly", "Sounds good"
+    skip_filler = user_message is not None and is_short_confirmation(user_message)
+    if skip_filler:
+        logger.info(
+            "[FILLER-SKIP] Short confirmation detected, skipping filler: %s",
+            repr(user_message[:60]),
+        )
+
+    if dg_ws and threshold_ms > 0 and not skip_filler:
         dynamic_phrase_holder: list[str | None] = [None]
         logger.info(
             "Filler armed: threshold=%dms dynamic=%s user_msg=%s",
@@ -153,6 +238,9 @@ async def proxy_chat_completions(request: Request):
         async def _inject_filler():
             await asyncio.sleep(threshold_ms / 1000)
             phrase = dynamic_phrase_holder[0]
+            if phrase == FILLER_SKIP:
+                logger.info("[FILLER-SKIP] Haiku returned SKIP, suppressing filler")
+                return
             if phrase:
                 logger.info("Dynamic filler available at threshold: %s", phrase)
             elif dynamic_started:
@@ -161,6 +249,9 @@ async def proxy_chat_completions(request: Request):
                 for _ in range(5):
                     await asyncio.sleep(0.1)
                     phrase = dynamic_phrase_holder[0]
+                    if phrase == FILLER_SKIP:
+                        logger.info("[FILLER-SKIP] Haiku returned SKIP during grace period, suppressing filler")
+                        return
                     if phrase:
                         logger.info("Dynamic filler arrived during grace period: %s", phrase)
                         break
@@ -201,21 +292,28 @@ async def proxy_chat_completions(request: Request):
     async def stream_body():
         try:
             filler_cancelled = False
+            content_started = False
             tool_names_logged: set[str] = set()
             async for chunk in _filtered_stream(resp.aiter_bytes()):
+                # --- Supersede check: abort if a newer request arrived ---
+                if cancel_event and cancel_event.is_set() and not content_started:
+                    logger.info("Request superseded for %s (seq %d), aborting", session_key, my_seq)
+                    break
+
                 # Cancel filler only when real content text starts streaming.
                 # SSE streams send an initial chunk with just {"delta":{"role":"..."}}
                 # before any actual text — cancelling on that would kill the filler
                 # even when the real response takes 10+ seconds (e.g. web search).
-                if (
-                    not filler_cancelled
-                    and filler_task
-                    and not filler_task.done()
-                    and _chunk_has_content(chunk)
-                ):
-                    filler_task.cancel()
-                    filler_cancelled = True
-                    logger.info("Filler cancelled: real content arrived")
+                if _chunk_has_content(chunk):
+                    content_started = True
+                    if (
+                        not filler_cancelled
+                        and filler_task
+                        and not filler_task.done()
+                    ):
+                        filler_task.cancel()
+                        filler_cancelled = True
+                        logger.info("Filler cancelled: real content arrived")
 
                 # Detect tool usage in SSE stream for observability
                 if b'"tool_calls"' in chunk or b'"function_call"' in chunk:
@@ -239,6 +337,11 @@ async def proxy_chat_completions(request: Request):
         finally:
             if filler_task and not filler_task.done():
                 filler_task.cancel()
+            # Clean up inflight entry only if we're still the current request
+            if session_key and my_seq is not None:
+                current = _inflight.get(session_key)
+                if current and current.seq == my_seq:
+                    del _inflight[session_key]
             await resp.aclose()
             await client.aclose()
 

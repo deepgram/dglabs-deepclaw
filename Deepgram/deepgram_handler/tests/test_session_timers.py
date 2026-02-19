@@ -181,3 +181,142 @@ async def test_clear_all_prevents_pending_callbacks():
 
     cb.inject_message.assert_not_called()
     cb.end_call.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Pause / Resume tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pause_prevents_timers_from_firing():
+    """Paused timers should not fire even after their timeout elapses."""
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(response_reengage_ms=100), cb)
+
+    timers.on_user_spoke()
+    timers.pause()
+    await asyncio.sleep(0.3)  # > 100ms reengage
+
+    cb.inject_message.assert_not_called()
+    cb.end_call.assert_not_called()
+
+    timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_pause_clears_running_timers():
+    """Calling pause() should cancel any in-flight timers."""
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(response_reengage_ms=100), cb)
+
+    timers.on_user_spoke()
+    await asyncio.sleep(0.05)  # < 100ms
+    timers.pause()
+    await asyncio.sleep(0.2)  # > 100ms total
+
+    cb.inject_message.assert_not_called()
+
+    timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_resume_re_enables_timers():
+    """After resume(), on_* events should schedule timers again."""
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(response_reengage_ms=100), cb)
+
+    timers.pause()
+    timers.on_user_spoke()  # Should be ignored (paused)
+    await asyncio.sleep(0.15)
+    cb.inject_message.assert_not_called()
+
+    timers.resume()
+    timers.on_user_spoke()  # Should work now
+    await asyncio.sleep(0.15)
+
+    cb.inject_message.assert_called_once_with("Re-engage")
+
+    timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_pause_blocks_all_event_methods():
+    """All on_* methods are no-ops while paused."""
+    cb = _make_callbacks()
+    timers = SessionTimers(
+        _make_config(response_reengage_ms=50, idle_prompt_ms=50), cb
+    )
+
+    timers.pause()
+
+    timers.on_user_spoke()
+    timers.on_agent_started_speaking()
+    timers.on_user_started_speaking()
+    timers.on_agent_audio_done()
+
+    await asyncio.sleep(0.2)
+
+    cb.inject_message.assert_not_called()
+    cb.end_call.assert_not_called()
+
+    timers.clear_all()
+
+
+# ---------------------------------------------------------------------------
+# Agent speaking clears idle timers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_agent_speaking_clears_idle_timers():
+    """Agent starting to speak should cancel idle timers.
+
+    Reproduces the bug where a filler phrase's AgentAudioDone starts the idle
+    timer, the LLM is slow, and the idle prompt fires mid-response because
+    on_agent_started_speaking only cleared response timers.
+    """
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(idle_prompt_ms=100, idle_exit_ms=100), cb)
+
+    # Filler finishes — starts idle timer
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.05)  # < 100ms — timer still pending
+
+    # Real response starts — should clear idle timer
+    timers.on_agent_started_speaking()
+    await asyncio.sleep(0.2)  # > 100ms — would have fired if not cleared
+
+    cb.inject_message.assert_not_called()
+    cb.end_call.assert_not_called()
+
+    timers.clear_all()
+
+
+@pytest.mark.asyncio
+async def test_agent_speaking_resets_idle_prompted_flag():
+    """Agent starting to speak should reset the idle_prompted flag.
+
+    If an idle prompt already fired, then the agent speaks (responding to the
+    prompt), the flag should reset so a new idle cycle can start after the
+    agent finishes.
+    """
+    cb = _make_callbacks()
+    timers = SessionTimers(_make_config(idle_prompt_ms=50, idle_exit_ms=500), cb)
+
+    # Idle prompt fires
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.1)  # > 50ms — prompt fires
+    assert cb.inject_message.call_count == 1
+
+    # Agent speaks (responding to prompt) — should reset idle_prompted
+    timers.on_agent_started_speaking()
+
+    # Agent finishes — should be able to start a new idle cycle
+    cb.inject_message.reset_mock()
+    timers.on_agent_audio_done()
+    await asyncio.sleep(0.1)  # > 50ms — prompt should fire again
+
+    cb.inject_message.assert_called_once_with("Still there?")
+
+    timers.clear_all()

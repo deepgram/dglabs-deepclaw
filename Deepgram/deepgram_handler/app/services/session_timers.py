@@ -46,6 +46,7 @@ class SessionTimers:
 
         self._idle_prompted: bool = False
         self._exiting: bool = False
+        self._paused: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -57,7 +58,7 @@ class SessionTimers:
 
     def on_user_spoke(self) -> None:
         """User spoke — start response timers, clear idle timers."""
-        if not self.enabled or self._exiting:
+        if not self.enabled or self._exiting or self._paused:
             return
 
         self._clear_response_timers()
@@ -87,13 +88,22 @@ class SessionTimers:
         )
 
     def on_agent_started_speaking(self) -> None:
-        """Agent started speaking — cancel response timers (silent recovery)."""
-        if not self.enabled or self._exiting:
+        """Agent started speaking — cancel response and idle timers.
+
+        Idle timers must also be cleared because the agent speaking means the
+        session is active.  Without this, a long LLM delay between a filler
+        phrase's AgentAudioDone and the real response's AgentStartedSpeaking
+        can cause the idle timer to fire mid-response.
+        """
+        if not self.enabled or self._exiting or self._paused:
             return
-        had_timers = self._response_reengage_handle is not None or self._response_exit_handle is not None
+        had_response = self._response_reengage_handle is not None or self._response_exit_handle is not None
+        had_idle = self._idle_prompt_handle is not None or self._idle_exit_handle is not None
         self._clear_response_timers()
-        if had_timers:
-            self._cb.log("[SessionTimers] on_agent_started_speaking — response timers cancelled")
+        self._clear_idle_timers()
+        self._idle_prompted = False
+        if had_response or had_idle:
+            self._cb.log("[SessionTimers] on_agent_started_speaking — response/idle timers cancelled")
 
     # ------------------------------------------------------------------
     # Idle caller detection chain
@@ -101,7 +111,7 @@ class SessionTimers:
 
     def on_user_started_speaking(self) -> None:
         """User started speaking — cancel idle timers (barge-in)."""
-        if not self.enabled or self._exiting:
+        if not self.enabled or self._exiting or self._paused:
             return
         had_timers = self._idle_prompt_handle is not None or self._idle_exit_handle is not None
         self._clear_idle_timers()
@@ -111,7 +121,7 @@ class SessionTimers:
 
     def on_agent_audio_done(self) -> None:
         """Agent finished speaking — start idle timers."""
-        if not self.enabled or self._exiting:
+        if not self.enabled or self._exiting or self._paused:
             return
         if self._idle_prompted:
             self._cb.log("[SessionTimers] on_agent_audio_done — skipped (idle_prompted guard)")
@@ -190,6 +200,22 @@ class SessionTimers:
             self._cb.log("[SessionTimers] Failed to inject idle exit message, proceeding with hangup")
         await asyncio.sleep(self._config.get("post_exit_delay_s", POST_EXIT_DELAY_S))
         await self._cb.end_call()
+
+    # ------------------------------------------------------------------
+    # Pause / Resume (used during mute)
+    # ------------------------------------------------------------------
+
+    def pause(self) -> None:
+        """Pause all timers (used during mute)."""
+        self._paused = True
+        self._clear_response_timers()
+        self._clear_idle_timers()
+        self._cb.log("[SessionTimers] paused")
+
+    def resume(self) -> None:
+        """Resume timer capability (used on unmute)."""
+        self._paused = False
+        self._cb.log("[SessionTimers] resumed")
 
     # ------------------------------------------------------------------
     # Cleanup

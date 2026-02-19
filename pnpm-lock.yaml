@@ -468,6 +468,12 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  extensions/page-builder:
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
   extensions/signal:
     devDependencies:
       openclaw:
@@ -475,6 +481,12 @@ importers:
         version: link:../..
 
   extensions/slack:
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
+  extensions/task-manager:
     devDependencies:
       openclaw:
         specifier: workspace:*
