@@ -8,7 +8,7 @@ overrides:
   fast-xml-parser: 5.3.4
   form-data: 2.5.4
   '@hono/node-server>hono': 4.11.8
-  hono: 4.11.8
+  hono: 4.11.10
   qs: 6.14.1
   '@sinclair/typebox': 0.34.48
   tar: 7.5.7
@@ -26,7 +26,7 @@ importers:
         version: 3.985.0
       '@buape/carbon':
         specifier: 0.14.0
-        version: 0.14.0(hono@4.11.8)
+        version: 0.14.0(hono@4.11.10)
       '@clack/prompts':
         specifier: ^1.0.0
         version: 1.0.0
@@ -112,8 +112,8 @@ importers:
         specifier: ^1.39.3
         version: 1.39.3
       hono:
-        specifier: 4.11.8
-        version: 4.11.8
+        specifier: 4.11.10
+        version: 4.11.10
       jiti:
         specifier: ^2.6.1
         version: 2.6.1
@@ -463,6 +463,12 @@ importers:
         version: link:../..
 
   extensions/open-prose:
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
+  extensions/page-builder:
     devDependencies:
       openclaw:
         specifier: workspace:*
@@ -2594,8 +2600,8 @@ packages:
   '@swc/helpers@0.5.18':
     resolution: {integrity: sha512-TXTnIcNJQEKwThMMqBXsZ4VGAza6bvN4pa41Rkqoio6QBKMvo+5lexeTMScGCIxtzgQJzElcvIltani+adC5PQ==}
 
-  '@thi.ng/bitstream@2.4.40':
-    resolution: {integrity: sha512-zMQ3xbfxlMwfUjEjnTtXE3ism/CVrfKug/Yn8EeljEWqR/s69QY7Avr60limwA25808kBR/P7BW4tNIx6RKI6w==}
+  '@thi.ng/bitstream@2.4.41':
+    resolution: {integrity: sha512-treRzw3+7I1YCuilFtznwT3SGtceS9spUXhyBqeuKNTm4nIfMuvg4fNqx4GgpuS6cGPQNPMUJm0OyzKnSe2Emw==}
     engines: {node: '>=18'}
 
   '@thi.ng/errors@2.6.3':
@@ -3746,8 +3752,8 @@ packages:
   highlight.js@10.7.3:
     resolution: {integrity: sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A==}
 
-  hono@4.11.8:
-    resolution: {integrity: sha512-eVkB/CYCCei7K2WElZW9yYQFWssG0DhaDhVvr7wy5jJ22K+ck8fWW0EsLpB0sITUTvPnc97+rrbQqIr5iqiy9Q==}
+  hono@4.11.10:
+    resolution: {integrity: sha512-kyWP5PAiMooEvGrA9jcD3IXF7ATu8+o7B3KCbPXid5se52NPqnOpM/r9qeW2heMnOekF4kqR1fXJqCYeCLKrZg==}
     engines: {node: '>=16.9.0'}
 
   hookable@6.0.1:
@@ -5120,6 +5126,7 @@ packages:
   tar@7.5.7:
     resolution: {integrity: sha512-fov56fJiRuThVFXD6o6/Q354S7pnWMJIVlDBYijsTNx6jKSE4pvrDTs6lUnmGvNyfJwFQQwWy3owKz1ucIhveQ==}
     engines: {node: '>=18'}
+    deprecated: Old versions of tar are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
 
   thenify-all@1.6.0:
     resolution: {integrity: sha512-RNxQH/qI8/t3thXJDwcstUO4zeqo64+Uy/+sNVRBx4Xn2OX+OZ9oP+iJnNFqplFra2ZUVeKCSa2oVWi3T4uVmA==}
@@ -6068,14 +6075,14 @@ snapshots:
 
   '@borewit/text-codec@0.2.1': {}
 
-  '@buape/carbon@0.14.0(hono@4.11.8)':
+  '@buape/carbon@0.14.0(hono@4.11.10)':
     dependencies:
       '@types/node': 25.2.2
       discord-api-types: 0.38.37
     optionalDependencies:
       '@cloudflare/workers-types': 4.20260120.0
       '@discordjs/voice': 0.19.0
-      '@hono/node-server': 1.19.9(hono@4.11.8)
+      '@hono/node-server': 1.19.9(hono@4.11.10)
       '@types/bun': 1.3.6
       '@types/ws': 8.18.1
       ws: 8.19.0
@@ -6330,9 +6337,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@hono/node-server@1.19.9(hono@4.11.8)':
+  '@hono/node-server@1.19.9(hono@4.11.10)':
     dependencies:
-      hono: 4.11.8
+      hono: 4.11.10
     optional: true
 
   '@huggingface/jinja@0.5.4': {}
@@ -7889,7 +7896,7 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@thi.ng/bitstream@2.4.40':
+  '@thi.ng/bitstream@2.4.41':
     dependencies:
       '@thi.ng/errors': 2.6.3
     optional: true
@@ -9233,7 +9240,7 @@ snapshots:
 
   highlight.js@10.7.3: {}
 
-  hono@4.11.8: {}
+  hono@4.11.10: {}
 
   hookable@6.0.1: {}
 
@@ -10276,7 +10283,7 @@ snapshots:
 
   qoa-format@1.0.1:
     dependencies:
-      '@thi.ng/bitstream': 2.4.40
+      '@thi.ng/bitstream': 2.4.41
     optional: true
 
   qrcode-terminal@0.12.0: {}
