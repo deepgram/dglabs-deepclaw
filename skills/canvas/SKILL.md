@@ -1,59 +1,19 @@
-# Canvas Skill
+---
+name: canvas
+description: "Display HTML content (games, visualizations, dashboards) on connected OpenClaw nodes (Mac, iOS, Android) via the canvas tool. Use when the user wants to present, navigate, snapshot, or hide web content on a connected device."
+---
 
-Display HTML content on connected OpenClaw nodes (Mac app, iOS, Android).
+# Canvas
 
-## Overview
-
-The canvas tool lets you present web content on any connected node's canvas view. Great for:
-
-- Displaying games, visualizations, dashboards
-- Showing generated HTML content
-- Interactive demos
-
-## How It Works
-
-### Architecture
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Canvas Host    │────▶│   Node Bridge    │────▶│  Node App   │
-│  (HTTP Server)  │     │  (TCP Server)    │     │ (Mac/iOS/   │
-│  Port 18793     │     │  Port 18790      │     │  Android)   │
-└─────────────────┘     └──────────────────┘     └─────────────┘
-```
-
-1. **Canvas Host Server**: Serves static HTML/CSS/JS files from `canvasHost.root` directory
-2. **Node Bridge**: Communicates canvas URLs to connected nodes
-3. **Node Apps**: Render the content in a WebView
-
-### Tailscale Integration
-
-The canvas host server binds based on `gateway.bind` setting:
-
-| Bind Mode  | Server Binds To     | Canvas URL Uses            |
-| ---------- | ------------------- | -------------------------- |
-| `loopback` | 127.0.0.1           | localhost (local only)     |
-| `lan`      | LAN interface       | LAN IP address             |
-| `tailnet`  | Tailscale interface | Tailscale hostname         |
-| `auto`     | Best available      | Tailscale > LAN > loopback |
-
-**Key insight:** The `canvasHostHostForBridge` is derived from `bridgeHost`. When bound to Tailscale, nodes receive URLs like:
-
-```
-http://<tailscale-hostname>:18793/__openclaw__/canvas/<file>.html
-```
-
-This is why localhost URLs don't work - the node receives the Tailscale hostname from the bridge!
+Present web content on any connected OpenClaw node's canvas view.
 
 ## Actions
 
-| Action     | Description                          |
-| ---------- | ------------------------------------ |
-| `present`  | Show canvas with optional target URL |
-| `hide`     | Hide the canvas                      |
-| `navigate` | Navigate to a new URL                |
-| `eval`     | Execute JavaScript in the canvas     |
-| `snapshot` | Capture screenshot of canvas         |
+- `present` - Show canvas with optional target URL
+- `hide` - Hide the canvas
+- `navigate` - Navigate to a new URL
+- `eval` - Execute JavaScript in the canvas
+- `snapshot` - Capture screenshot of canvas
 
 ## Configuration
 
@@ -73,74 +33,17 @@ In `~/.openclaw/openclaw.json`:
 }
 ```
 
-### Live Reload
+Bind modes: `loopback` (127.0.0.1), `lan` (LAN IP), `tailnet` (Tailscale hostname), `auto` (best available).
 
-When `liveReload: true` (default), the canvas host:
-
-- Watches the root directory for changes (via chokidar)
-- Injects a WebSocket client into HTML files
-- Automatically reloads connected canvases when files change
-
-Great for development!
+When bound to Tailscale/LAN, nodes receive URLs like `http://<hostname>:18793/__openclaw__/canvas/<file>.html`. Do not use localhost when bound to a non-loopback mode.
 
 ## Workflow
 
-### 1. Create HTML content
-
-Place files in the canvas root directory (default `~/clawd/canvas/`):
-
-```bash
-cat > ~/clawd/canvas/my-game.html << 'HTML'
-<!DOCTYPE html>
-<html>
-<head><title>My Game</title></head>
-<body>
-  <h1>Hello Canvas!</h1>
-</body>
-</html>
-HTML
-```
-
-### 2. Find your canvas host URL
-
-Check how your gateway is bound:
-
-```bash
-cat ~/.openclaw/openclaw.json | jq '.gateway.bind'
-```
-
-Then construct the URL:
-
-- **loopback**: `http://127.0.0.1:18793/__openclaw__/canvas/<file>.html`
-- **lan/tailnet/auto**: `http://<hostname>:18793/__openclaw__/canvas/<file>.html`
-
-Find your Tailscale hostname:
-
-```bash
-tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//'
-```
-
-### 3. Find connected nodes
-
-```bash
-openclaw nodes list
-```
-
-Look for Mac/iOS/Android nodes with canvas capability.
-
-### 4. Present content
-
-```
-canvas action:present node:<node-id> target:<full-url>
-```
-
-**Example:**
-
-```
-canvas action:present node:mac-63599bc4-b54d-4392-9048-b97abd58343a target:http://peters-mac-studio-1.sheep-coho.ts.net:18793/__openclaw__/canvas/snake.html
-```
-
-### 5. Navigate, snapshot, or hide
+1. Place HTML files in the canvas root (default `~/clawd/canvas/`)
+2. Determine canvas host URL based on bind mode: `cat ~/.openclaw/openclaw.json | jq '.gateway.bind'`
+3. Find connected nodes: `openclaw nodes list`
+4. Present: `canvas action:present node:<node-id> target:<full-url>`
+5. Navigate/snapshot/hide:
 
 ```
 canvas action:navigate node:<node-id> url:<new-url>
@@ -150,49 +53,13 @@ canvas action:hide node:<node-id>
 
 ## Debugging
 
-### White screen / content not loading
+- White screen: URL mismatch. Use the hostname matching your bind mode, not localhost. Test with `curl http://<hostname>:18793/__openclaw__/canvas/<file>.html`.
+- "node required": Always specify `node:<node-id>`.
+- "node not connected": Node is offline. Check `openclaw nodes list`.
+- Content not updating: Verify `liveReload: true` in config and file is in the canvas root.
 
-**Cause:** URL mismatch between server bind and node expectation.
+## Notes
 
-**Debug steps:**
-
-1. Check server bind: `cat ~/.openclaw/openclaw.json | jq '.gateway.bind'`
-2. Check what port canvas is on: `lsof -i :18793`
-3. Test URL directly: `curl http://<hostname>:18793/__openclaw__/canvas/<file>.html`
-
-**Solution:** Use the full hostname matching your bind mode, not localhost.
-
-### "node required" error
-
-Always specify `node:<node-id>` parameter.
-
-### "node not connected" error
-
-Node is offline. Use `openclaw nodes list` to find online nodes.
-
-### Content not updating
-
-If live reload isn't working:
-
-1. Check `liveReload: true` in config
-2. Ensure file is in the canvas root directory
-3. Check for watcher errors in logs
-
-## URL Path Structure
-
-The canvas host serves from `/__openclaw__/canvas/` prefix:
-
-```
-http://<host>:18793/__openclaw__/canvas/index.html  → ~/clawd/canvas/index.html
-http://<host>:18793/__openclaw__/canvas/games/snake.html → ~/clawd/canvas/games/snake.html
-```
-
-The `/__openclaw__/canvas/` prefix is defined by `CANVAS_HOST_PATH` constant.
-
-## Tips
-
-- Keep HTML self-contained (inline CSS/JS) for best results
-- Use the default index.html as a test page (has bridge diagnostics)
-- The canvas persists until you `hide` it or navigate away
-- Live reload makes development fast - just save and it updates!
-- A2UI JSON push is WIP - use HTML files for now
+- Keep HTML self-contained (inline CSS/JS) for best results.
+- `liveReload: true` (default) auto-reloads connected canvases on file changes.
+- URL path prefix: `/__openclaw__/canvas/`.

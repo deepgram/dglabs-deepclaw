@@ -1,7 +1,6 @@
 ---
 name: notion
-description: Notion API for creating and managing pages, databases, and blocks.
-homepage: https://developers.notion.com
+description: "Create, read, update, and query Notion pages, databases (data sources), and blocks via the Notion API. Use when the user asks to manage content in Notion, search pages, query databases, update properties, or organize workspace content."
 metadata:
   {
     "openclaw":
@@ -16,157 +15,63 @@ Use the Notion API to create/read/update pages, data sources (databases), and bl
 ## Setup
 
 1. Create an integration at https://notion.so/my-integrations
-2. Copy the API key (starts with `ntn_` or `secret_`)
-3. Store it:
-
-```bash
-mkdir -p ~/.config/notion
-echo "ntn_your_key_here" > ~/.config/notion/api_key
-```
-
-4. Share target pages/databases with your integration (click "..." → "Connect to" → your integration name)
+2. Copy the API key (starts with `ntn_` or `secret_`), store in `~/.config/notion/api_key`
+3. Share target pages/databases with your integration ("..." > "Connect to" > integration name)
 
 ## API Basics
 
-All requests need:
+All requests require these headers (Notion-Version `2025-09-03`):
 
 ```bash
 NOTION_KEY=$(cat ~/.config/notion/api_key)
-curl -X GET "https://api.notion.com/v1/..." \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03" \
-  -H "Content-Type: application/json"
+NOTION_HEADERS='-H "Authorization: Bearer $NOTION_KEY" -H "Notion-Version: 2025-09-03" -H "Content-Type: application/json"'
 ```
-
-> **Note:** The `Notion-Version` header is required. This skill uses `2025-09-03` (latest). In this version, databases are called "data sources" in the API.
 
 ## Common Operations
 
-**Search for pages and data sources:**
-
 ```bash
-curl -X POST "https://api.notion.com/v1/search" \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "page title"}'
-```
+# Search
+curl -X POST "https://api.notion.com/v1/search" $NOTION_HEADERS -d '{"query": "page title"}'
 
-**Get page:**
+# Get page / page content
+curl "https://api.notion.com/v1/pages/{page_id}" $NOTION_HEADERS
+curl "https://api.notion.com/v1/blocks/{page_id}/children" $NOTION_HEADERS
 
-```bash
-curl "https://api.notion.com/v1/pages/{page_id}" \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03"
-```
+# Create page in a database
+curl -X POST "https://api.notion.com/v1/pages" $NOTION_HEADERS \
+  -d '{"parent":{"database_id":"xxx"},"properties":{"Name":{"title":[{"text":{"content":"New Item"}}]},"Status":{"select":{"name":"Todo"}}}}'
 
-**Get page content (blocks):**
+# Query a data source
+curl -X POST "https://api.notion.com/v1/data_sources/{data_source_id}/query" $NOTION_HEADERS \
+  -d '{"filter":{"property":"Status","select":{"equals":"Active"}},"sorts":[{"property":"Date","direction":"descending"}]}'
 
-```bash
-curl "https://api.notion.com/v1/blocks/{page_id}/children" \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03"
-```
+# Create a data source
+curl -X POST "https://api.notion.com/v1/data_sources" $NOTION_HEADERS \
+  -d '{"parent":{"page_id":"xxx"},"title":[{"text":{"content":"My Database"}}],"properties":{"Name":{"title":{}},"Status":{"select":{"options":[{"name":"Todo"},{"name":"Done"}]}},"Date":{"date":{}}}}'
 
-**Create page in a data source:**
+# Update page properties
+curl -X PATCH "https://api.notion.com/v1/pages/{page_id}" $NOTION_HEADERS \
+  -d '{"properties":{"Status":{"select":{"name":"Done"}}}}'
 
-```bash
-curl -X POST "https://api.notion.com/v1/pages" \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "parent": {"database_id": "xxx"},
-    "properties": {
-      "Name": {"title": [{"text": {"content": "New Item"}}]},
-      "Status": {"select": {"name": "Todo"}}
-    }
-  }'
-```
-
-**Query a data source (database):**
-
-```bash
-curl -X POST "https://api.notion.com/v1/data_sources/{data_source_id}/query" \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "filter": {"property": "Status", "select": {"equals": "Active"}},
-    "sorts": [{"property": "Date", "direction": "descending"}]
-  }'
-```
-
-**Create a data source (database):**
-
-```bash
-curl -X POST "https://api.notion.com/v1/data_sources" \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "parent": {"page_id": "xxx"},
-    "title": [{"text": {"content": "My Database"}}],
-    "properties": {
-      "Name": {"title": {}},
-      "Status": {"select": {"options": [{"name": "Todo"}, {"name": "Done"}]}},
-      "Date": {"date": {}}
-    }
-  }'
-```
-
-**Update page properties:**
-
-```bash
-curl -X PATCH "https://api.notion.com/v1/pages/{page_id}" \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03" \
-  -H "Content-Type: application/json" \
-  -d '{"properties": {"Status": {"select": {"name": "Done"}}}}'
-```
-
-**Add blocks to page:**
-
-```bash
-curl -X PATCH "https://api.notion.com/v1/blocks/{page_id}/children" \
-  -H "Authorization: Bearer $NOTION_KEY" \
-  -H "Notion-Version: 2025-09-03" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "children": [
-      {"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"text": {"content": "Hello"}}]}}
-    ]
-  }'
+# Add blocks to page
+curl -X PATCH "https://api.notion.com/v1/blocks/{page_id}/children" $NOTION_HEADERS \
+  -d '{"children":[{"object":"block","type":"paragraph","paragraph":{"rich_text":[{"text":{"content":"Hello"}}]}}]}'
 ```
 
 ## Property Types
 
-Common property formats for database items:
-
 - **Title:** `{"title": [{"text": {"content": "..."}}]}`
 - **Rich text:** `{"rich_text": [{"text": {"content": "..."}}]}`
-- **Select:** `{"select": {"name": "Option"}}`
-- **Multi-select:** `{"multi_select": [{"name": "A"}, {"name": "B"}]}`
-- **Date:** `{"date": {"start": "2024-01-15", "end": "2024-01-16"}}`
-- **Checkbox:** `{"checkbox": true}`
-- **Number:** `{"number": 42}`
-- **URL:** `{"url": "https://..."}`
-- **Email:** `{"email": "a@b.com"}`
+- **Select:** `{"select": {"name": "Option"}}` / **Multi-select:** `{"multi_select": [{"name": "A"}]}`
+- **Date:** `{"date": {"start": "2024-01-15"}}` / **Checkbox:** `{"checkbox": true}`
+- **Number:** `{"number": 42}` / **URL:** `{"url": "https://..."}` / **Email:** `{"email": "a@b.com"}`
 - **Relation:** `{"relation": [{"id": "page_id"}]}`
 
-## Key Differences in 2025-09-03
+## API Version 2025-09-03 Notes
 
-- **Databases → Data Sources:** Use `/data_sources/` endpoints for queries and retrieval
-- **Two IDs:** Each database now has both a `database_id` and a `data_source_id`
-  - Use `database_id` when creating pages (`parent: {"database_id": "..."}`)
-  - Use `data_source_id` when querying (`POST /v1/data_sources/{id}/query`)
-- **Search results:** Databases return as `"object": "data_source"` with their `data_source_id`
-- **Parent in responses:** Pages show `parent.data_source_id` alongside `parent.database_id`
-- **Finding the data_source_id:** Search for the database, or call `GET /v1/data_sources/{data_source_id}`
-
-## Notes
-
+- Databases are now "data sources": use `/data_sources/` endpoints for queries
+- Each database has both `database_id` (for creating pages) and `data_source_id` (for querying)
+- Search returns databases as `"object": "data_source"`
 - Page/database IDs are UUIDs (with or without dashes)
-- The API cannot set database view filters — that's UI-only
-- Rate limit: ~3 requests/second average
-- Use `is_inline: true` when creating data sources to embed them in pages
+- Rate limit: ~3 req/sec. View filters are UI-only.
+- Use `is_inline: true` when creating data sources to embed in pages
