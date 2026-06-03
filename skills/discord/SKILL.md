@@ -1,7 +1,7 @@
 ---
 name: discord
-description: “Control Discord via the discord tool. Send/edit/delete messages, react, post stickers, upload emojis, run polls, manage threads/pins/search, create/edit/delete channels and categories, fetch permissions or member/role/channel info, set bot presence/activity, and handle moderation. Use when the user asks to interact with Discord channels, DMs, or server management.”
-metadata: {“openclaw”:{“emoji”:”🎮”,”requires”:{“config”:[“channels.discord”]}}}
+description: "Control Discord via the discord tool. Send/edit/delete messages, react, post stickers, upload emojis, run polls, manage threads/pins/search, create/edit/delete channels and categories, fetch permissions or member/role/channel info, set bot presence/activity, and handle moderation. Use when the user asks to interact with Discord channels, DMs, or server management."
+metadata: {"openclaw":{"emoji":"🎮","requires":{"config":["channels.discord"]}}}
 ---
 
 # Discord Actions
