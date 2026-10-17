@@ -45,6 +45,26 @@ Auth + config
 - OAuth: `mcporter auth <server | url> [--reset]`
 - Config: `mcporter config list|get|add|remove|import|login|logout`
 
+Parallel web search (optional)
+
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) provides
+free web search and page fetching without an account or API key for light use.
+Anonymous searches use Fast mode. With `mcporter` installed, run from your workspace:
+
+```bash
+mcporter config add parallel-search https://search.parallel.ai/mcp \
+  --header 'User-Agent=deepclaw-mcporter'
+mcporter list parallel-search --schema
+mcporter call parallel-search.web_search --args '{"objective":"Find Deepgram streaming speech-to-text documentation","search_queries":["Deepgram streaming speech to text docs"]}' --output json
+mcporter call parallel-search.web_fetch --args '{"urls":["https://developers.deepgram.com/docs/interim-results"],"objective":"Understand interim and final streaming transcripts"}' --output json
+```
+
+This adds a server to `./config/mcporter.json`. Choose an unused name: `config add`
+replaces an existing entry with the same name. Other server entries are preserved.
+Use URLs from search results in `web_fetch`. For related calls, include the same
+`session_id` in both JSON payloads; generate a new UUID for each conversation.
+This is an opt-in CLI workflow; OpenClaw's built-in web tools are unchanged.
+
 Daemon
 
 - `mcporter daemon start|status|stop|restart`
