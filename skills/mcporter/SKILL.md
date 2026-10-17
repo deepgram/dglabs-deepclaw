@@ -56,7 +56,7 @@ mcporter config add parallel-search https://search.parallel.ai/mcp \
   --header 'User-Agent=deepclaw-mcporter'
 mcporter list parallel-search --schema
 mcporter call parallel-search.web_search --args '{"objective":"Find Deepgram streaming speech-to-text documentation","search_queries":["Deepgram streaming speech to text docs"]}' --output json
-mcporter call parallel-search.web_fetch --args '{"urls":["https://developers.deepgram.com/docs/streaming"]}' --output json
+mcporter call parallel-search.web_fetch --args '{"urls":["https://developers.deepgram.com/docs/interim-results"],"objective":"Understand interim and final streaming transcripts"}' --output json
 ```
 
 This adds a server to `./config/mcporter.json`. Choose an unused name: `config add`
